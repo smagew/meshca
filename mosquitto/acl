@@ -1,0 +1,6 @@
+# The observer may only publish, the collector may only read.
+user observer
+topic write meshcore/#
+
+user collector
+topic read meshcore/#

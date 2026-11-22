@@ -1,0 +1,25 @@
+# secrets and local settings
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# captured data and database files never go to the repo
+data/
+*.jsonl
+*.sqlite*
+*.db
+*.dump
+*.parquet
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
