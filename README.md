@@ -19,6 +19,7 @@
 ```
 compose.yaml      стек Docker Compose: mosquitto, postgres, migrate, collector, worker, grafana
 collector/        сборщик: MQTT → PostgreSQL, без разбора пакетов
+migrate/          применение схемы базы (отдельный образ, чтобы новая миграция не перезапускала сборщик)
 worker/           разбор пакетов и контроль сбора
 grafana/          панели и источник данных как код
 db/migrations/    схема базы

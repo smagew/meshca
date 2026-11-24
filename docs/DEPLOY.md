@@ -38,7 +38,8 @@ docker compose exec mosquitto mosquitto_pub -h localhost -u observer -P "$(grep 
 docker compose exec postgres psql -U meshca -d meshca -c "select id, ingested_at, kind from observer_message order by id desc limit 3"
 ```
 
-Обновление: `git pull && docker compose up -d --build`.
+Обновление: `git pull && docker compose up -d --build`. Сборщик при этом перезапускается, только если менялся
+сам каталог `collector/`: схема базы и расчёты обновляются без потери пакетов.
 
 ## 2. Подключение observer'а
 

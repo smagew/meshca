@@ -4,13 +4,25 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
+import psycopg
 from psycopg import sql
 
-from . import db
-
 log = logging.getLogger("meshca.migrate")
+
+
+def connect(retries: int = 30, delay_s: float = 2.0) -> psycopg.Connection:
+    """Connect using PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD, waiting for the database to come up."""
+    for attempt in range(1, retries + 2):
+        try:
+            return psycopg.connect(connect_timeout=10, application_name="meshca-migrate")
+        except psycopg.OperationalError as e:
+            if attempt > retries:
+                raise
+            log.warning("database not reachable (attempt %d/%d): %s", attempt, retries, str(e).strip())
+            time.sleep(delay_s)
 
 
 def _ensure_reader(conn) -> None:
@@ -38,7 +50,7 @@ def main() -> int:
         log.error("no migrations found in %s", directory)
         return 1
 
-    conn = db.connect(retries=30)
+    conn = connect()
     try:
         with conn.transaction():
             conn.execute(
