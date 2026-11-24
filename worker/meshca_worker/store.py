@@ -12,7 +12,8 @@ from .decode import ChannelKeys, DecodeError
 log = logging.getLogger("meshca.store")
 
 DERIVED_TABLES = ("node_history", "node", "advert", "channel_message", "direct_packet", "anon_request",
-                  "reception", "packet", "decode_error", "path_resolution", "origin_resolution")
+                  "reception", "packet", "decode_error", "path_resolution", "origin_resolution",
+                  "edge_daily", "sender_route", "critical_node")
 MAX_MENTIONED_CHANNELS = 2000     # channels learned from "#name" mentions; configured ones are not limited
 MAX_MENTIONS_PER_MESSAGE = 5
 U32_MAX = 0xFFFFFFFF

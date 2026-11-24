@@ -67,6 +67,7 @@ def analytics_loop(stop: threading.Event, every: timedelta, window_days: int) ->
             with connect() as conn:
                 jobs.resolve_paths(conn, window_days)
                 jobs.resolve_origins(conn, window_days)
+                jobs.build_topology(conn, window_days)
         except Exception:
             log.exception("analytics run failed")
         stop.wait(every.total_seconds())

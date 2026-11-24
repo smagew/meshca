@@ -57,6 +57,13 @@
    "url": "/d/meshca-map",
    "keepTime": true,
    "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Топология",
+   "url": "/d/meshca-topology",
+   "keepTime": true,
+   "icon": "dashboard"
   }
  ],
  "templating": {

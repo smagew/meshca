@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 from psycopg.types.json import Jsonb
 
-from . import origin, resolve
+from . import origin, resolve, topology
 
 log = logging.getLogger("meshca.analytics")
 
@@ -126,4 +126,52 @@ def resolve_origins(conn: psycopg.Connection, window_days: int) -> dict:
              summary["seconds"], summary["resolved_share"], Jsonb(evaluation)))
         cur.execute("DELETE FROM origin_run WHERE computed_at < %s", (now - timedelta(days=400),))
     log.info("origin resolution: %s; evaluation %s", summary, evaluation)
+    return summary
+
+
+def build_topology(conn: psycopg.Connection, window_days: int) -> dict:
+    """Stage 5: links between neighbouring repeaters, routes of every known sender, critical repeaters."""
+    started = time.monotonic()
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=window_days)
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM edge_daily WHERE day >= %s::date", (since,))
+        cur.execute("""
+            INSERT INTO edge_daily (day, from_node, to_node, packets)
+            SELECT day, from_node, to_node, count(DISTINCT packet_hash) FROM (
+                SELECT a.received_at::date AS day, a.packet_hash, a.node_id AS from_node,
+                       b.node_id AS to_node
+                FROM v_hop_resolved a JOIN v_hop_resolved b ON b.reception_id = a.reception_id AND b.position = a.position + 1
+                WHERE a.received_at >= %(since)s::date
+                UNION ALL
+                SELECT received_at::date, packet_hash, node_id, '@observer'
+                FROM v_hop_resolved WHERE from_end = 0 AND received_at >= %(since)s::date
+            ) e WHERE from_node <> to_node GROUP BY 1, 2, 3""", {"since": since})
+        edges = cur.rowcount
+
+        # One row per reception of a packet whose sender is certain: the route as a list of node ids.
+        rows = cur.execute("""
+            SELECT s.sender, coalesce(h.route, ARRAY[]::text[]), count(*)
+            FROM v_sender s JOIN reception r ON r.packet_hash = s.packet_hash
+            LEFT JOIN LATERAL (SELECT array_agg(node_id ORDER BY position) AS route
+                               FROM v_hop_resolved WHERE reception_id = r.id) h ON true
+            WHERE r.route_type IN (0, 1) AND r.received_at >= %s AND s.sender IS NOT NULL
+            GROUP BY 1, 2""", (since,)).fetchall()
+        routes: dict[str, dict[tuple[str, ...], float]] = {}
+        for sender, route, count in rows:
+            routes.setdefault(sender, {})[tuple(route)] = float(count)
+        senders, critical = topology.summarise(routes)
+
+        cur.execute("DELETE FROM sender_route")
+        cur.executemany(
+            "INSERT INTO sender_route (sender, packets, routes, entropy, direct_share, critical, judged, computed_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            [(s["sender"], int(s["packets"]), s["routes"], s["entropy"], s["direct_share"], s["critical"], s["judged"], now)
+             for s in senders])
+        cur.execute("DELETE FROM critical_node")
+        cur.executemany("INSERT INTO critical_node (node, senders_cut, senders, computed_at) VALUES (%s,%s,%s,%s)",
+                        [(c["node"], c["senders_cut"], c["senders"], now) for c in critical])
+    summary = {"edges": edges, "senders": len(senders), "judged": sum(s["judged"] for s in senders),
+               "critical_nodes": len(critical), "seconds": round(time.monotonic() - started, 2)}
+    log.info("topology: %s", summary)
     return summary

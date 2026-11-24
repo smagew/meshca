@@ -39,12 +39,13 @@ class Board:
 
     def add(self, kind: str, title: str, sql: str | list[str], w: int, h: int, fmt: str = "table",
             description: str = "", defaults: dict | None = None, options: dict | None = None,
-            overrides: list | None = None) -> None:
+            overrides: list | None = None, ref_ids: list[str] | None = None) -> None:
         queries = [sql] if isinstance(sql, str) else sql
+        ref_ids = ref_ids or list("ABCDEF")
         self.panels.append({
             "id": len(self.panels) + 1, "type": kind, "title": title, "description": description,
             "datasource": DS, "gridPos": self._place(w, h),
-            "targets": [{"refId": "ABCDEF"[i], "datasource": DS, "format": fmt, "rawQuery": True,
+            "targets": [{"refId": ref_ids[i], "datasource": DS, "format": fmt, "rawQuery": True,
                          "rawSql": " ".join(q.split())} for i, q in enumerate(queries)],
             "fieldConfig": {"defaults": defaults or {}, "overrides": overrides or []},
             "options": options or {},
@@ -133,7 +134,8 @@ class Board:
 
 BOARDS = [("meshca-overview", "meshca · Обзор"), ("meshca-nodes", "meshca · Узлы"),
           ("meshca-relays", "meshca · Ретрансляторы"), ("meshca-channels", "meshca · Каналы"),
-          ("meshca-radio", "meshca · Радио"), ("meshca-rhythm", "meshca · Ритм"), ("meshca-map", "meshca · Карта")]
+          ("meshca-radio", "meshca · Радио"), ("meshca-rhythm", "meshca · Ритм"), ("meshca-map", "meshca · Карта"),
+          ("meshca-topology", "meshca · Топология")]
 
 ONE_POINT = "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer."
 
@@ -490,8 +492,47 @@ def node_map() -> Board:
     return b
 
 
+def topology() -> Board:
+    b = Board(*BOARDS[7], ONE_POINT + " Связь «A → B» значит: B принял пакет от A и передал дальше. Все маршруты "
+              "ведут к нашему observer'у, поэтому это не вся сеть, а её часть, обращённая к нам. Выводы о критичных "
+              "узлах верны настолько, насколько верно определены узлы за префиксами (панель «Ретрансляторы»).",
+              time_from="now-7d")
+    edges = f"""(SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily
+                 WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e"""
+    b.add("nodeGraph", "Граф связей", [f"""
+        SELECT id, node_label(id) AS title, sum(packets)::text AS mainstat FROM (
+            SELECT from_node AS id, packets FROM {edges} UNION ALL
+            SELECT to_node, 0 FROM {edges.replace(') e', ') e2')}) x GROUP BY id""", f"""
+        SELECT from_node || '>' || to_node AS id, from_node AS source, to_node AS target, packets::text AS mainstat
+        FROM {edges} ORDER BY packets DESC LIMIT 150"""], 24, 16, ref_ids=["nodes", "edges"],
+          description="Число у узла — сколько пакетов он передал дальше, у связи — сколько пакетов по ней прошло. "
+                      "В связи попадают 150 самых загруженных; узлы без таких связей показаны отдельно стоящими.")
+    b.table("Критичные узлы", """
+        SELECT node_label(node) AS "узел", senders_cut AS "отправителей отрежет",
+               array_to_string(senders, ', ') AS "кто перестанет до нас доходить"
+        FROM critical_node ORDER BY senders_cut DESC, node LIMIT 200""", w=14, h=10,
+        description="Ретрансляторы, которые стоят на всех наблюдавшихся маршрутах отправителя к нашему observer'у. "
+                    "Учитываются отправители с не менее чем 10 приёмами. Прямые соседи observer'а "
+                    "попадают сюда закономерно: всё приходит к нам через них.")
+    b.table("Отправители с единственным маршрутом", """
+        SELECT sender AS "отправитель", packets AS "приёмов",
+               (SELECT string_agg(node_label(c), ' → ') FROM unnest(critical) AS c) AS "маршрут держится на"
+        FROM sender_route WHERE judged AND routes = 1 AND direct_share < 1 ORDER BY packets DESC LIMIT 200""", w=10, h=10,
+        description="Все принятые пакеты этих отправителей пришли одним и тем же путём.")
+    b.table("Разнообразие маршрутов отправителей", """
+        SELECT sender AS "отправитель", packets AS "приёмов", routes AS "маршрутов", round(entropy::numeric, 2) AS "энтропия, бит",
+               round(100 * direct_share::numeric) AS "слышим напрямую, %", cardinality(critical) AS "критичных узлов",
+               CASE WHEN judged THEN 'да' ELSE 'мало данных' END AS "оценка надёжна"
+        FROM sender_route ORDER BY packets DESC LIMIT 500""", w=24, h=12,
+        description="Энтропия 0 — всегда один маршрут; чем больше, тем равномернее пакеты распределены по разным путям.")
+    b.table("Самые загруженные связи", f"""
+        SELECT node_label(from_node) AS "от узла", node_label(to_node) AS "к узлу", packets AS "пакетов"
+        FROM {edges} ORDER BY packets DESC LIMIT 300""", w=24, h=10)
+    return b
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for build in (overview, nodes, relays, channels, radio, rhythm, node_map):
+    for build in (overview, nodes, relays, channels, radio, rhythm, node_map, topology):
         build().save()
     print("written:", ", ".join(sorted(p.name for p in OUT.glob("*.json"))))

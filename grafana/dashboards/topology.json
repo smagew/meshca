@@ -1,0 +1,277 @@
+{
+ "uid": "meshca-topology",
+ "title": "meshca · Топология",
+ "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Связь «A → B» значит: B принял пакет от A и передал дальше. Все маршруты ведут к нашему observer'у, поэтому это не вся сеть, а её часть, обращённая к нам. Выводы о критичных узлах верны настолько, насколько верно определены узлы за префиксами (панель «Ретрансляторы»).",
+ "tags": [
+  "meshca"
+ ],
+ "timezone": "browser",
+ "editable": false,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "links": [
+  {
+   "type": "link",
+   "title": "meshca · Обзор",
+   "url": "/d/meshca-overview",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Узлы",
+   "url": "/d/meshca-nodes",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ретрансляторы",
+   "url": "/d/meshca-relays",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Каналы",
+   "url": "/d/meshca-channels",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Радио",
+   "url": "/d/meshca-radio",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ритм",
+   "url": "/d/meshca-rhythm",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Карта",
+   "url": "/d/meshca-map",
+   "keepTime": true,
+   "icon": "dashboard"
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "nodeGraph",
+   "title": "Граф связей",
+   "description": "Число у узла — сколько пакетов он передал дальше, у связи — сколько пакетов по ней прошло. В связи попадают 150 самых загруженных; узлы без таких связей показаны отдельно стоящими.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 16
+   },
+   "targets": [
+    {
+     "refId": "nodes",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT id, node_label(id) AS title, sum(packets)::text AS mainstat FROM ( SELECT from_node AS id, packets FROM (SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e UNION ALL SELECT to_node, 0 FROM (SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e2) x GROUP BY id"
+    },
+    {
+     "refId": "edges",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT from_node || '>' || to_node AS id, from_node AS source, to_node AS target, packets::text AS mainstat FROM (SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e ORDER BY packets DESC LIMIT 150"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {}
+  },
+  {
+   "id": 2,
+   "type": "table",
+   "title": "Критичные узлы",
+   "description": "Ретрансляторы, которые стоят на всех наблюдавшихся маршрутах отправителя к нашему observer'у. Учитываются отправители с не менее чем 10 приёмами. Прямые соседи observer'а попадают сюда закономерно: всё приходит к нам через них.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 14,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT node_label(node) AS \"узел\", senders_cut AS \"отправителей отрежет\", array_to_string(senders, ', ') AS \"кто перестанет до нас доходить\" FROM critical_node ORDER BY senders_cut DESC, node LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 3,
+   "type": "table",
+   "title": "Отправители с единственным маршрутом",
+   "description": "Все принятые пакеты этих отправителей пришли одним и тем же путём.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 14,
+    "y": 16,
+    "w": 10,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT sender AS \"отправитель\", packets AS \"приёмов\", (SELECT string_agg(node_label(c), ' → ') FROM unnest(critical) AS c) AS \"маршрут держится на\" FROM sender_route WHERE judged AND routes = 1 AND direct_share < 1 ORDER BY packets DESC LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 4,
+   "type": "table",
+   "title": "Разнообразие маршрутов отправителей",
+   "description": "Энтропия 0 — всегда один маршрут; чем больше, тем равномернее пакеты распределены по разным путям.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 26,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT sender AS \"отправитель\", packets AS \"приёмов\", routes AS \"маршрутов\", round(entropy::numeric, 2) AS \"энтропия, бит\", round(100 * direct_share::numeric) AS \"слышим напрямую, %\", cardinality(critical) AS \"критичных узлов\", CASE WHEN judged THEN 'да' ELSE 'мало данных' END AS \"оценка надёжна\" FROM sender_route ORDER BY packets DESC LIMIT 500"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 5,
+   "type": "table",
+   "title": "Самые загруженные связи",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 38,
+    "w": 24,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT node_label(from_node) AS \"от узла\", node_label(to_node) AS \"к узлу\", packets AS \"пакетов\" FROM (SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e ORDER BY packets DESC LIMIT 300"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  }
+ ]
+}
