@@ -1,0 +1,299 @@
+{
+ "uid": "meshca-channels",
+ "title": "meshca · Каналы",
+ "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Расшифровываются Public и хештег-каналы с известным именем. Тексты хранятся ограниченное время, потом остаются отправитель, время, канал и длина.",
+ "tags": [
+  "meshca"
+ ],
+ "timezone": "browser",
+ "editable": false,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "links": [
+  {
+   "type": "link",
+   "title": "meshca · Обзор",
+   "url": "/d/meshca-overview",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Узлы",
+   "url": "/d/meshca-nodes",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ретрансляторы",
+   "url": "/d/meshca-relays",
+   "keepTime": true,
+   "icon": "dashboard"
+  }
+ ],
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "Сообщения по каналам",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "time_series",
+     "rawQuery": true,
+     "rawSql": "SELECT $__timeGroupAlias(p.first_seen, $__interval), coalesce(m.channel, 'неизвестный ' || m.channel_hash) AS metric, count(*) AS value FROM channel_message m JOIN packet p ON p.hash = m.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1, 2 ORDER BY 1"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "lineWidth": 0,
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "sum"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 2,
+   "type": "table",
+   "title": "Каналы",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 14,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT coalesce(m.channel, 'неизвестный ' || m.channel_hash) AS \"канал\", CASE m.payload_type WHEN 5 THEN 'текст' ELSE 'данные' END AS \"вид\", m.decrypted AS \"расшифрован\", count(*) AS \"сообщений\", count(DISTINCT m.sender_name) AS \"отправителей\", round(avg(m.text_len)) AS \"средняя длина\", max(p.first_seen) AS \"последнее\" FROM channel_message m JOIN packet p ON p.hash = m.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1, 2, 3 ORDER BY 4 DESC"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 3,
+   "type": "table",
+   "title": "Кто пишет в каналы",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 14,
+    "y": 8,
+    "w": 10,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT m.sender_name AS \"отправитель\", m.channel AS \"канал\", count(*) AS \"сообщений\" FROM channel_message m JOIN packet p ON p.hash = m.packet_hash WHERE $__timeFilter(p.first_seen) AND m.decrypted AND m.sender_name IS NOT NULL GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 4,
+   "type": "table",
+   "title": "Последние сообщения",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 17,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT p.first_seen AS \"время\", m.channel AS \"канал\", m.sender_name AS \"отправитель\", CASE WHEN m.text_removed THEN '(текст удалён по сроку хранения)' ELSE m.text END AS \"текст\", p.reception_count AS \"копий\" FROM channel_message m JOIN packet p ON p.hash = m.packet_hash WHERE $__timeFilter(p.first_seen) AND m.decrypted AND m.payload_type = 5 ORDER BY p.first_seen DESC LIMIT 300"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 5,
+   "type": "table",
+   "title": "Метки регионов (scope)",
+   "description": "Пакеты, отправленные с ограничением по региону сети. Какому региону соответствует код, пока не определяется.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 29,
+    "w": 14,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT r.transport_codes AS \"коды транспорта\", count(*) AS \"приёмов\", count(DISTINCT r.packet_hash) AS \"пакетов\", string_agg(DISTINCT payload_type_name(p.payload_type), ', ') AS \"типы\" FROM reception r JOIN packet p ON p.hash = r.packet_hash WHERE $__timeFilter(r.received_at) AND r.transport_codes IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 50"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 6,
+   "type": "table",
+   "title": "Известные каналы",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 14,
+    "y": 29,
+    "w": 10,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"канал\", hash AS \"хеш\", CASE source WHEN 'builtin' THEN 'встроенный' WHEN 'config' THEN 'из настроек' ELSE 'из упоминания' END AS \"откуда\", added_at AS \"добавлен\" FROM channel ORDER BY added_at DESC, name LIMIT 500"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  }
+ ]
+}

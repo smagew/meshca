@@ -1,0 +1,310 @@
+{
+ "uid": "meshca-relays",
+ "title": "meshca · Ретрансляторы",
+ "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Узел за префиксом назван, только если в справочнике ровно один ретранслятор с таким началом ключа; иначе показано число кандидатов.",
+ "tags": [
+  "meshca"
+ ],
+ "timezone": "browser",
+ "editable": false,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "links": [
+  {
+   "type": "link",
+   "title": "meshca · Обзор",
+   "url": "/d/meshca-overview",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Узлы",
+   "url": "/d/meshca-nodes",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Каналы",
+   "url": "/d/meshca-channels",
+   "keepTime": true,
+   "icon": "dashboard"
+  }
+ ],
+ "panels": [
+  {
+   "id": 1,
+   "type": "table",
+   "title": "Какие узлы чаще всего пересылают пакеты",
+   "description": "Доля — от всех пакетов, пришедших через ретрансляторы. «Первым в пути» — узел стоял сразу после отправителя. «Шагов до нас»: 0 — прямой сосед observer'а. Один узел может встречаться дважды: с однобайтовым и двухбайтовым префиксом.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT coalesce(pn.name, '—') AS \"узел\", h.prefix AS \"префикс\", pn.candidates AS \"кандидатов\", count(DISTINCT h.packet_hash) AS \"пакетов\", round(100.0 * count(DISTINCT h.packet_hash) / nullif((SELECT count(DISTINCT packet_hash) FROM reception WHERE route_type IN (0, 1) AND hop_count > 0 AND $__timeFilter(received_at)), 0), 1) AS \"доля, %\", count(DISTINCT h.packet_hash) FILTER (WHERE h.position = 1) AS \"первым в пути\", round(avg(h.from_end), 1) AS \"шагов до нас\" FROM v_hop h LEFT JOIN v_prefix_node pn ON pn.prefix = h.prefix WHERE $__timeFilter(h.received_at) GROUP BY 1, 2, 3 ORDER BY \"пакетов\" DESC LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Пакеты через главные ретрансляторы",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 24,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "time_series",
+     "rawQuery": true,
+     "rawSql": "SELECT $__timeGroupAlias(h.received_at, $__interval), coalesce(pn.name, h.prefix) AS metric, count(DISTINCT h.packet_hash) AS value FROM v_hop h LEFT JOIN v_prefix_node pn ON pn.prefix = h.prefix WHERE $__timeFilter(h.received_at) AND h.prefix IN ( SELECT prefix FROM v_hop WHERE $__timeFilter(received_at) GROUP BY 1 ORDER BY count(DISTINCT packet_hash) DESC LIMIT 8) GROUP BY 1, 2 ORDER BY 1"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "lineWidth": 0,
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "sum"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 3,
+   "type": "table",
+   "title": "Прямые соседи: кого слышит observer",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 14,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT coalesce(pn.name, '—') AS \"узел\", coalesce(r.last_hop, 'сам отправитель') AS \"префикс\", count(*) AS \"приёмов\", count(DISTINCT r.packet_hash) AS \"пакетов\", round(avg(r.rssi)) AS \"RSSI, дБм\", round(avg(r.snr)::numeric, 1) AS \"SNR, дБ\" FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop WHERE $__timeFilter(r.received_at) AND r.route_type IN (0, 1) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 4,
+   "type": "barchart",
+   "title": "Длина пути",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 14,
+    "y": 20,
+    "w": 10,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT hop_count::text AS \"ретрансляторов в пути\", count(*) AS \"приёмов\" FROM reception WHERE $__timeFilter(received_at) AND route_type IN (0, 1) GROUP BY hop_count ORDER BY hop_count"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "xTickLabelRotation": 0,
+    "showValue": "auto"
+   }
+  },
+  {
+   "id": 5,
+   "type": "piechart",
+   "title": "Размер префикса в пути",
+   "description": "Чем длиннее префикс, тем увереннее определяется узел.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT prefix_size || ' байт' AS metric, count(*) AS value FROM reception WHERE $__timeFilter(received_at) AND hop_count > 0 GROUP BY 1 ORDER BY 1"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": true
+    },
+    "pieType": "donut",
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "values": [
+      "value",
+      "percent"
+     ]
+    }
+   }
+  },
+  {
+   "id": 6,
+   "type": "table",
+   "title": "Самые частые пути",
+   "description": "Слева — ближе к отправителю, справа — наш прямой сосед.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 28,
+    "w": 16,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT array_to_string(path, ' → ') AS \"путь\", hop_count AS \"длина\", count(DISTINCT packet_hash) AS \"пакетов\" FROM reception WHERE $__timeFilter(received_at) AND route_type IN (0, 1) AND hop_count > 0 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 100"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  }
+ ]
+}

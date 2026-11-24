@@ -1,0 +1,341 @@
+{
+ "uid": "meshca-nodes",
+ "title": "meshca · Узлы",
+ "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Отправитель известен точно только у объявлений, анонимных запросов и расшифрованных сообщений каналов; имя в сообщении канала протоколом не проверяется.",
+ "tags": [
+  "meshca"
+ ],
+ "timezone": "browser",
+ "editable": false,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "links": [
+  {
+   "type": "link",
+   "title": "meshca · Обзор",
+   "url": "/d/meshca-overview",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ретрансляторы",
+   "url": "/d/meshca-relays",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Каналы",
+   "url": "/d/meshca-channels",
+   "keepTime": true,
+   "icon": "dashboard"
+  }
+ ],
+ "panels": [
+  {
+   "id": 1,
+   "type": "table",
+   "title": "Кто сколько отправил",
+   "description": "Уникальные пакеты за выбранный период. Личные сообщения сюда не входят: у них виден только однобайтовый хеш отправителя (таблица ниже).",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT s.sender AS \"отправитель\", count(*) FILTER (WHERE s.kind = 'объявление') AS \"объявления\", count(*) FILTER (WHERE s.kind = 'сообщение канала') AS \"сообщения каналов\", count(*) FILTER (WHERE s.kind = 'анонимный запрос') AS \"анонимные запросы\", count(*) AS \"всего\", round(extract(epoch FROM max(p.first_seen) - min(p.first_seen)) / 60 / nullif(count(*) - 1, 0)) AS \"средний интервал, мин\", min(p.first_seen) AS \"первый\", max(p.first_seen) AS \"последний\" FROM v_sender s JOIN packet p ON p.hash = s.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1 ORDER BY \"всего\" DESC LIMIT 300"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Пакеты самых активных отправителей",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 24,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "time_series",
+     "rawQuery": true,
+     "rawSql": "SELECT $__timeGroupAlias(p.first_seen, $__interval), s.sender AS metric, count(*) AS value FROM v_sender s JOIN packet p ON p.hash = s.packet_hash WHERE $__timeFilter(p.first_seen) AND s.sender IN ( SELECT s2.sender FROM v_sender s2 JOIN packet p2 ON p2.hash = s2.packet_hash WHERE $__timeFilter(p2.first_seen) GROUP BY 1 ORDER BY count(*) DESC LIMIT 10) GROUP BY 1, 2 ORDER BY 1"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "lineWidth": 0,
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "sum"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 3,
+   "type": "barchart",
+   "title": "Активность по часам суток",
+   "description": "Все уникальные пакеты. Часовой пояс задаётся настройкой MESHCA_TIMEZONE.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT lpad(extract(hour FROM first_seen)::text, 2, '0') AS \"час\", count(*) AS \"пакетов\" FROM packet WHERE $__timeFilter(first_seen) GROUP BY 1 ORDER BY 1"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "xTickLabelRotation": 0,
+    "showValue": "auto"
+   }
+  },
+  {
+   "id": 4,
+   "type": "barchart",
+   "title": "Объявления по ролям узлов",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT node_role_name(a.role) AS \"роль\", count(DISTINCT a.pubkey) AS \"узлов\" FROM advert a JOIN packet p ON p.hash = a.packet_hash WHERE a.signature_ok AND $__timeFilter(p.first_seen) GROUP BY 1 ORDER BY 2 DESC"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "xTickLabelRotation": 0,
+    "showValue": "auto"
+   }
+  },
+  {
+   "id": 5,
+   "type": "table",
+   "title": "Справочник узлов",
+   "description": "За всё время сбора, только по объявлениям с верной подписью.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"имя\", node_role_name(role) AS \"роль\", lat AS \"широта\", lon AS \"долгота\", advert_count AS \"объявлений\", first_seen AS \"впервые\", last_seen AS \"последний раз\", left(pubkey, 12) AS \"ключ\" FROM node ORDER BY last_seen DESC LIMIT 1000"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 6,
+   "type": "table",
+   "title": "Личные пакеты по хешу отправителя",
+   "description": "REQ, RESPONSE, TXT_MSG, PATH: виден только первый байт ключа отправителя, поэтому кандидатов может быть несколько.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 40,
+    "w": 14,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT d.src_hash AS \"хеш отправителя\", payload_type_name(p.payload_type) AS \"тип\", count(*) AS \"пакетов\", (SELECT count(*) FROM node n WHERE left(n.pubkey, 2) = d.src_hash) AS \"узлов с таким хешем\", (SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM node n WHERE left(n.pubkey, 2) = d.src_hash) AS \"кто это может быть\" FROM direct_packet d JOIN packet p ON p.hash = d.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 7,
+   "type": "table",
+   "title": "Изменения узлов",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 14,
+    "y": 40,
+    "w": 10,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT h.changed_at AS \"когда\", n.name AS \"узел\", CASE h.field WHEN 'name' THEN 'имя' WHEN 'role' THEN 'роль' ELSE 'координаты' END AS \"что\", h.old AS \"было\", h.new AS \"стало\" FROM node_history h JOIN node n ON n.pubkey = h.pubkey ORDER BY h.changed_at DESC LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  }
+ ]
+}

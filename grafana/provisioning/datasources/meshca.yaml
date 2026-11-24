@@ -1,0 +1,17 @@
+apiVersion: 1
+datasources:
+  - name: meshca
+    uid: meshca
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: meshca_grafana
+    isDefault: true
+    editable: false
+    jsonData:
+      database: meshca
+      sslmode: disable
+      postgresVersion: 1700
+      maxOpenConns: 5
+    secureJsonData:
+      password: $GRAFANA_DB_PASSWORD

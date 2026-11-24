@@ -13,7 +13,8 @@
 git clone https://github.com/smagew/meshca.git /srv/meshca/app
 cd /srv/meshca/app
 cp .env.example .env && chmod 600 .env
-# заполнить .env: MESHCA_DATA_DIR и три пароля (openssl rand -hex 24)
+# заполнить .env: MESHCA_DATA_DIR и пять паролей (openssl rand -hex 24)
+mkdir -p "$MESHCA_DATA_DIR/grafana" && chown 472:0 "$MESHCA_DATA_DIR/grafana"   # значение MESHCA_DATA_DIR из .env
 docker compose up -d --build
 docker compose ps          # collector, worker и postgres должны быть healthy
 ```
@@ -27,6 +28,7 @@ docker compose ps          # collector, worker и postgres должны быть
 | `migrate` | Применяет `db/migrations/*.sql` и завершается | — |
 | `collector` | Пишет каждое сообщение observer'а в базу без изменений | — |
 | `worker` | Разбирает пакеты (пути, узлы, каналы), следит за поступлением данных | — |
+| `grafana` | Панели: обзор, узлы, ретрансляторы, каналы. Чтение без входа | `3001` в локальной сети |
 
 Проверка без observer'а (тестовое сообщение попадёт в `observer_message`):
 
@@ -115,7 +117,17 @@ sudo systemctl restart meshcore-packet-capture
 - **Проверка разбора:** `select count(*) from decode_error` (должно быть 0 или единицы) и
   `select count(*) from reception where hash_ok is false` (должно быть 0).
 
-## 6. Что важно знать
+## 6. Панели
+
+Grafana открыта на порту `3001` сервера: `http://АДРЕС_СЕРВЕРА:3001`. Просмотр без входа, поэтому порт не должен
+быть доступен из интернета. Изменение настроек Grafana — под пользователем `admin` (пароль `GRAFANA_ADMIN_PASSWORD`).
+
+- Панели читают базу под отдельным пользователем `meshca_grafana` с правом только на чтение.
+- Часы суток на графиках считаются в поясе `MESHCA_TIMEZONE` (после изменения — `docker compose up -d`).
+- Панели описаны в `grafana/build_dashboards.py`. Править нужно его, затем `python3 grafana/build_dashboards.py`;
+  готовые файлы `grafana/dashboards/*.json` Grafana перечитывает сама раз в минуту.
+
+## 7. Что важно знать
 
 - Observer публикует с qos 0: пока `collector` или брокер выключены, пакеты в базу не попадают и позже не досылаются (в LetsMesh они при этом уходят).
 - **Observer не повторяет попытку к брокеру, который не ответил при его старте.** Если сервис observer'а запустился,
