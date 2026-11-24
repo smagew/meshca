@@ -3,7 +3,8 @@
 Аналитика трафика сети MeshCore по данным собственного observer'а: кто сколько отправляет,
 какие узлы ретранслируют, какие закономерности есть в активности сети.
 
-Статус: **этап 1 из 9** — сбор пакетов в PostgreSQL. Разбор и аналитика в плане.
+Статус: **этап 2 из 9** — пакеты собираются в PostgreSQL и разбираются: пути, справочник узлов,
+сообщения каналов. Панели и аналитика в плане.
 
 - [docs/SPEC.md](docs/SPEC.md) — спецификация: данные, архитектура, алгоритмы, интерфейс, критерии приёмки.
 - [docs/PLAN.md](docs/PLAN.md) — план работ по этапам.
@@ -15,8 +16,9 @@
 ## Состав
 
 ```
-compose.yaml      стек Docker Compose: mosquitto, postgres, migrate, collector
+compose.yaml      стек Docker Compose: mosquitto, postgres, migrate, collector, worker
 collector/        сборщик: MQTT → PostgreSQL, без разбора пакетов
+worker/           разбор пакетов и контроль сбора
 db/migrations/    схема базы
 mosquitto/        настройки брокера и права пользователей
 tests/            модульные тесты (pytest)

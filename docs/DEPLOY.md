@@ -15,7 +15,7 @@ cd /srv/meshca/app
 cp .env.example .env && chmod 600 .env
 # заполнить .env: MESHCA_DATA_DIR и три пароля (openssl rand -hex 24)
 docker compose up -d --build
-docker compose ps          # collector и postgres должны быть healthy
+docker compose ps          # collector, worker и postgres должны быть healthy
 ```
 
 Что запускается:
@@ -26,6 +26,7 @@ docker compose ps          # collector и postgres должны быть healthy
 | `postgres` | База `meshca` | `5433`, только с самого сервера |
 | `migrate` | Применяет `db/migrations/*.sql` и завершается | — |
 | `collector` | Пишет каждое сообщение observer'а в базу без изменений | — |
+| `worker` | Разбирает пакеты (пути, узлы, каналы), следит за поступлением данных | — |
 
 Проверка без observer'а (тестовое сообщение попадёт в `observer_message`):
 
@@ -96,7 +97,22 @@ sudo systemctl restart meshcore-packet-capture
 
 После этого observer работает в точности как до подключения. Стек на сервере можно остановить: `docker compose down` (данные остаются в `MESHCA_DATA_DIR`).
 
-## 5. Что важно знать
+## 5. Каналы и оповещения
+
+Настройки в `.env`, после изменения — `docker compose up -d`.
+
+- **Каналы.** Public расшифровывается всегда. Хештег-каналы — те, чьи имена перечислены в `MESHCA_CHANNELS`
+  (без `#`, через запятую), и те, что упомянуты как `#имя` в уже расшифрованных сообщениях. При добавлении
+  канала ранее сохранённые его сообщения расшифровываются. Список: `select name, source from channel`.
+- **Срок хранения текстов** — `MESHCA_TEXT_RETENTION_DAYS` (30). После него текст удаляется из разобранных
+  таблиц, а из сырой записи вырезается зашифрованное содержимое; отправитель, время, канал и длина остаются.
+- **Оповещения.** Проверки «связь с observer'ом» и «пакеты» описаны в SPEC, раздел 9. Без настройки они пишут
+  только в журнал `worker` и в таблицу `monitor_event`. Чтобы получать их, задайте `MESHCA_ALERT_WEBHOOK_URL`:
+  туда уйдёт POST с JSON `{"check", "state", "title", "message"}`.
+- **Проверка разбора:** `select count(*) from decode_error` (должно быть 0 или единицы) и
+  `select count(*) from reception where hash_ok is false` (должно быть 0).
+
+## 6. Что важно знать
 
 - Observer публикует с qos 0: пока `collector` или брокер выключены, пакеты в базу не попадают и позже не досылаются (в LetsMesh они при этом уходят).
 - **Observer не повторяет попытку к брокеру, который не ответил при его старте.** Если сервис observer'а запустился,

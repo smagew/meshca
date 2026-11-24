@@ -1,6 +1,6 @@
 # meshca: спецификация
 
-Версия 0.2, 2026-11-22. Статус: этап 1 (сбор) реализован, остальное в плане.
+Версия 0.3, 2026-11-24. Статус: этапы 1 (сбор) и 2 (разбор) реализованы, остальное в плане.
 
 ## 1. Назначение
 
@@ -43,6 +43,8 @@
 `route`, `payload_len`, `raw` (весь пакет в hex), `SNR`, `RSSI`, `hash`.
 
 Поле `path` на верхнем уровне есть только у пакетов с маршрутом `D`. Для остальных путь берём из `raw`.
+Поле `payload_len` у observer'а равно полной длине пакета (как `len`), длину содержимого считаем сами.
+В одной сети встречаются пакеты и с однобайтовыми, и с двухбайтовыми префиксами пути.
 
 Тема `.../status`: состояние observer'а (модель, прошивка, параметры радио, статистика) раз в 5 минут.
 
@@ -77,7 +79,9 @@
   и один перезапуск сервиса. Существующие файлы не редактируются. Декодирование в observer'е не включается.
 - **O-2.** Публикация в наш брокер идёт с qos 0. Недоступность нашего брокера не должна влиять на захват
   и на отправку в LetsMesh. По коду observer'а это так (брокеры независимы, сервис считается неисправным
-  только при отказе всех брокеров); проверяется испытанием из критериев приёмки этапа 1.
+  только при отказе всех брокеров); подтверждено испытаниями этапа 1 ([DEPLOY.md](DEPLOY.md), раздел 3).
+  Найденное ограничение observer'а: к брокеру, который не ответил при его старте, он больше не подключается
+  до перезапуска сервиса. На LetsMesh это не влияет; для нас это повод для проверки связи (раздел 9).
 - **O-3.** Откат: удалить этот файл, перезапустить сервис. Инструкция: [DEPLOY.md](DEPLOY.md).
 - **O-4.** На машину observer'а не ставится ничего из этого проекта.
 
@@ -121,16 +125,24 @@ PostgreSQL актуальной стабильной версии, Grafana. Ра
 | `observer_message` | `id`, `ingested_at`, `topic`, `kind`, `retained`, `payload jsonb`, `payload_text` | Все остальные сообщения observer'а: `status`, `neighbors` и любые новые |
 
 ### Разобранный слой
+Строит `worker` из сырого слоя. Ключи, хеши и префиксы — текст в hex нижним регистром; `hash` пакета — как у observer'а, верхним.
+
 | Таблица | Поля | Смысл |
 |---|---|---|
-| `reception` | `id` (= `raw_reception.id`), `received_at`, `observer_id`, `packet_hash`, `route_type`, `snr`, `rssi`, `packet_len`, `path bytea[]`, `hop_count`, `prefix_size`, `last_hop`, `decoder_version` | Один приём |
-| `packet` | `hash` PK, `first_seen`, `payload_type`, `payload_len`, `payload bytea`, `reception_count` | Уникальный пакет |
-| `advert` | `packet_hash`, `pubkey`, `advert_time`, `role`, `lat`, `lon`, `name` | Разобранное объявление |
-| `node` | `pubkey` PK, `name`, `role`, `lat`, `lon`, `first_seen`, `last_seen` | Справочник узлов |
+| `reception` | `id` (= `raw_reception.id`), `received_at`, `observer_id`, `packet_hash`, `route_type`, `snr`, `rssi`, `packet_len`, `path text[]`, `hop_count`, `prefix_size`, `last_hop`, `transport_codes`, `hash_ok`, `decoder_version` | Один приём. `last_hop` — ретранслятор, которого observer услышал напрямую (только для маршрутов FLOOD; пусто, если услышан сам отправитель) |
+| `packet` | `hash` PK, `first_seen`, `last_seen`, `payload_type`, `payload_len`, `payload bytea`, `reception_count` | Уникальный пакет |
+| `advert` | `packet_hash`, `pubkey`, `advert_time`, `role`, `lat`, `lon`, `name`, `signature_ok` | Разобранное объявление; подпись Ed25519 проверяется |
+| `node` | `pubkey` PK, `name`, `role`, `lat`, `lon`, `first_seen`, `last_seen`, `advert_count` | Справочник узлов, только по объявлениям с верной подписью |
 | `node_history` | `pubkey`, `changed_at`, `field`, `old`, `new` | Смена имени, роли, координат |
-| `channel_message` | `packet_hash`, `channel_hash`, `channel`, `decrypted`, `sender_name`, `text`, `msg_time` | Сообщения каналов |
+| `channel` | `name`, `key`, `hash`, `source`, `added_at` | Каналы с известным ключом: Public, из настроек, из упоминаний `#имя` |
+| `channel_message` | `packet_hash`, `payload_type`, `channel_hash`, `channel`, `decrypted`, `sender_name`, `text`, `text_len`, `msg_time`, `data_type`, `ciphertext_len`, `text_removed` | Сообщения каналов (GRP_TXT и GRP_DATA) |
 | `direct_packet` | `packet_hash`, `dst_hash`, `src_hash` | REQ, RESPONSE, TXT_MSG, PATH |
 | `anon_request` | `packet_hash`, `dst_hash`, `sender_pubkey` | ANON_REQ |
+| `decode_error` | `raw_id`, `error`, `decoder_version` | Сырая запись, которую не удалось разобрать, и причина |
+| `worker_state` | `key`, `value jsonb` | Позиция разбора, версия разборщика, состояние проверок |
+| `monitor_event` | `id`, `at`, `name`, `state`, `message`, `notified` | Смена состояния проверок сбора (раздел 9) |
+
+При смене версии разборщика `worker` очищает разобранный слой и строит его заново из `raw_reception`.
 
 ### Аналитический слой
 | Таблица | Поля | Смысл |
@@ -265,7 +277,10 @@ PostgreSQL актуальной стабильной версии, Grafana. Ра
   всей накопленной истории, восстановить её неоткуда. Вернуться к вопросу после вехи A.
 - **Публичный репозиторий:** в файлах, сообщениях коммитов и обсуждениях нет адресов и имён машин,
   ключей, личных данных владельца и захваченных данных.
-- **Контроль сбора:** оповещение, если нет новых приёмов дольше 30 минут.
+- **Контроль сбора:** две проверки в `worker`. «Связь с observer'ом»: нет сообщения о состоянии (оно приходит
+  раз в 5 минут) дольше 15 минут — observer не подключён к нашему брокеру, нужен перезапуск его сервиса.
+  «Пакеты»: связь есть, но приёмов нет дольше 30 минут. Смена состояния пишется в `monitor_event` и в журнал,
+  а при заданном адресе (`MESHCA_ALERT_WEBHOOK_URL`) отправляется туда запросом POST.
 - **Секреты:** пароли брокера и базы, ключи каналов — только в `.env` вне репозитория. В репозитории `.env.example`.
 - **Данные вне репозитория:** захваченные пакеты, тексты каналов и дампы в git не попадают.
 - **Язык:** код, комментарии, журналы — английский; документация и интерфейс — русский.
