@@ -91,7 +91,11 @@ class Resolver:
 
     def _base_weight(self, node_id: str) -> float:
         if is_unknown(node_id):
-            return self.params.unknown_weight
+            # A long prefix that fits no known node is a real repeater we merely have no advert of: it competes
+            # on equal terms. "Some node nobody has seen with a long prefix" stays a weak alternative.
+            prefix = node_id[1:]
+            orphan = len(prefix) > 2 and not any(k.startswith(prefix) for k in self.nodes)
+            return 1.0 if orphan else self.params.unknown_weight
         return 1.0 if self.nodes[node_id].active else self.params.inactive_weight
 
     def _plausible(self, a: str, b: str) -> float:

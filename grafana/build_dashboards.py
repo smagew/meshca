@@ -226,19 +226,36 @@ def nodes() -> Board:
                left(pubkey, 12) AS "ключ"
         FROM node WHERE coalesce(role, 0) IN (${role:csv}) ORDER BY last_seen DESC LIMIT 1000""", h=12,
         description="За всё время сбора, только по объявлениям с верной подписью.")
-    b.table("Личные пакеты по хешу отправителя", f"""
-        SELECT d.src_hash AS "хеш отправителя", payload_type_name(p.payload_type) AS "тип", count(*) AS "пакетов",
-               (SELECT count(*) FROM node n WHERE left(n.pubkey, 2) = d.src_hash) AS "узлов с таким хешем",
-               (SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM node n WHERE left(n.pubkey, 2) = d.src_hash) AS "кто это может быть"
-        FROM direct_packet d JOIN packet p ON p.hash = d.packet_hash WHERE {T}(p.first_seen)
-        GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200""", w=14,
-        description="REQ, RESPONSE, TXT_MSG, PATH: виден только первый байт ключа отправителя, поэтому кандидатов "
-                    "может быть несколько.")
+    last_run = "(SELECT * FROM origin_run ORDER BY id DESC LIMIT 1) r"
+    b.table("Кто отправляет личные пакеты (оценка)", f"""
+        SELECT o.label AS "отправитель", min(o.status) AS "определение",
+               count(*) FILTER (WHERE p.payload_type = 2) AS "сообщения", count(*) FILTER (WHERE p.payload_type = 0) AS "запросы",
+               count(*) FILTER (WHERE p.payload_type = 1) AS "ответы", count(*) FILTER (WHERE p.payload_type = 8) AS "пути",
+               count(*) AS "всего", round(avg(o.probability)::numeric, 2) AS "вероятность"
+        FROM v_origin_resolved o JOIN packet p ON p.hash = o.packet_hash WHERE {T}(p.first_seen)
+        GROUP BY 1 ORDER BY "всего" DESC LIMIT 300""", w=16, h=10,
+        description="У личных пакетов (TXT_MSG, REQ, RESPONSE, PATH) виден только первый байт ключа отправителя. Узел "
+                    "определяется по «отпечатку пути»: через какие ретрансляторы обычно входят в сеть его объявления. "
+                    "Имя показано при вероятности от 0,7. Строки с «?» — байт отправителя, узел не определён. "
+                    "«Нет пути от отправителя» — пакет шёл прямым маршрутом, по нему отправителя не найти.")
+    b.stat("Определено отправителей", f"SELECT 100 * resolved_share FROM {last_run}", unit="percent",
+           description="Доля личных пакетов, у которых отправитель назван с вероятностью от 0,7.",
+           thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 40}, {"color": "green", "value": 70}])
+    b.stat("Точность на проверке", f"SELECT 100 * (evaluation->>'accuracy')::numeric FROM {last_run}", unit="percent",
+           description="Проверка: у части пакетов с точно известным отправителем (объявления, анонимные запросы) он "
+                       "скрывается, остаётся один байт, и метод должен найти его заново. Учитываются только случаи, "
+                       "когда под байт подходят два и более известных узла.",
+           thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 70}, {"color": "green", "value": 90}])
+    b.stat("Точность уверенных ответов", f"SELECT 100 * (evaluation->>'confident_accuracy')::numeric FROM {last_run}",
+           unit="percent", description="То же среди ответов с вероятностью от 0,7: именно они показаны именами.",
+           thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 80}, {"color": "green", "value": 95}])
+    b.stat("Случаев в проверке", f"SELECT (evaluation->>'packets')::int FROM {last_run}",
+           description="При малом числе цифрам точности верить рано.")
     b.table("Изменения узлов", """
         SELECT h.changed_at AS "когда", n.name AS "узел",
                CASE h.field WHEN 'name' THEN 'имя' WHEN 'role' THEN 'роль' ELSE 'координаты' END AS "что",
                h.old AS "было", h.new AS "стало"
-        FROM node_history h JOIN node n ON n.pubkey = h.pubkey ORDER BY h.changed_at DESC LIMIT 200""", w=10)
+        FROM node_history h JOIN node n ON n.pubkey = h.pubkey ORDER BY h.changed_at DESC LIMIT 200""", w=24, h=8)
     return b
 
 

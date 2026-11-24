@@ -331,8 +331,8 @@
   {
    "id": 6,
    "type": "table",
-   "title": "Личные пакеты по хешу отправителя",
-   "description": "REQ, RESPONSE, TXT_MSG, PATH: виден только первый байт ключа отправителя, поэтому кандидатов может быть несколько.",
+   "title": "Кто отправляет личные пакеты (оценка)",
+   "description": "У личных пакетов (TXT_MSG, REQ, RESPONSE, PATH) виден только первый байт ключа отправителя. Узел определяется по «отпечатку пути»: через какие ретрансляторы обычно входят в сеть его объявления. Имя показано при вероятности от 0,7. Строки с «?» — байт отправителя, узел не определён. «Нет пути от отправителя» — пакет шёл прямым маршрутом, по нему отправителя не найти.",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "meshca"
@@ -340,7 +340,7 @@
    "gridPos": {
     "x": 0,
     "y": 40,
-    "w": 14,
+    "w": 16,
     "h": 10
    },
    "targets": [
@@ -352,7 +352,7 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT d.src_hash AS \"хеш отправителя\", payload_type_name(p.payload_type) AS \"тип\", count(*) AS \"пакетов\", (SELECT count(*) FROM node n WHERE left(n.pubkey, 2) = d.src_hash) AS \"узлов с таким хешем\", (SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM node n WHERE left(n.pubkey, 2) = d.src_hash) AS \"кто это может быть\" FROM direct_packet d JOIN packet p ON p.hash = d.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200"
+     "rawSql": "SELECT o.label AS \"отправитель\", min(o.status) AS \"определение\", count(*) FILTER (WHERE p.payload_type = 2) AS \"сообщения\", count(*) FILTER (WHERE p.payload_type = 0) AS \"запросы\", count(*) FILTER (WHERE p.payload_type = 1) AS \"ответы\", count(*) FILTER (WHERE p.payload_type = 8) AS \"пути\", count(*) AS \"всего\", round(avg(o.probability)::numeric, 2) AS \"вероятность\" FROM v_origin_resolved o JOIN packet p ON p.hash = o.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1 ORDER BY \"всего\" DESC LIMIT 300"
     }
    ],
    "fieldConfig": {
@@ -370,6 +370,250 @@
   },
   {
    "id": 7,
+   "type": "stat",
+   "title": "Определено отправителей",
+   "description": "Доля личных пакетов, у которых отправитель назван с вероятностью от 0,7.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 40,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * resolved_share FROM (SELECT * FROM origin_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 40
+       },
+       {
+        "color": "green",
+        "value": 70
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 8,
+   "type": "stat",
+   "title": "Точность на проверке",
+   "description": "Проверка: у части пакетов с точно известным отправителем (объявления, анонимные запросы) он скрывается, остаётся один байт, и метод должен найти его заново. Учитываются только случаи, когда под байт подходят два и более известных узла.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 40,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * (evaluation->>'accuracy')::numeric FROM (SELECT * FROM origin_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 70
+       },
+       {
+        "color": "green",
+        "value": 90
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 9,
+   "type": "stat",
+   "title": "Точность уверенных ответов",
+   "description": "То же среди ответов с вероятностью от 0,7: именно они показаны именами.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 50,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * (evaluation->>'confident_accuracy')::numeric FROM (SELECT * FROM origin_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 80
+       },
+       {
+        "color": "green",
+        "value": 95
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 10,
+   "type": "stat",
+   "title": "Случаев в проверке",
+   "description": "При малом числе цифрам точности верить рано.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 50,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT (evaluation->>'packets')::int FROM (SELECT * FROM origin_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 11,
    "type": "table",
    "title": "Изменения узлов",
    "description": "",
@@ -378,10 +622,10 @@
     "uid": "meshca"
    },
    "gridPos": {
-    "x": 14,
-    "y": 40,
-    "w": 10,
-    "h": 10
+    "x": 0,
+    "y": 54,
+    "w": 24,
+    "h": 8
    },
    "targets": [
     {

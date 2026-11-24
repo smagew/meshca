@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 from psycopg.types.json import Jsonb
 
-from . import resolve
+from . import origin, resolve
 
 log = logging.getLogger("meshca.analytics")
 
@@ -62,4 +62,68 @@ def resolve_paths(conn: psycopg.Connection, window_days: int) -> dict:
         # Runs are history for the accuracy chart; keep it bounded.
         cur.execute("DELETE FROM resolution_run WHERE computed_at < %s", (now - timedelta(days=400),))
     log.info("path resolution: %s; evaluation %s", summary, evaluation)
+    return summary
+
+
+FEATURES_SQL = """
+    WITH feature AS (
+        SELECT packet_hash, position || ':' || label AS f FROM v_hop_resolved
+        WHERE position <= 2 AND received_at >= %(since)s
+        UNION
+        SELECT packet_hash, '1:@direct' FROM reception
+        WHERE route_type IN (0, 1) AND hop_count = 0 AND received_at >= %(since)s
+    ), per_packet AS (
+        SELECT packet_hash, array_agg(DISTINCT f) AS features FROM feature GROUP BY packet_hash
+    )
+"""
+
+
+def resolve_origins(conn: psycopg.Connection, window_days: int) -> dict:
+    """Stage 4: name the sender of packets that carry one byte of its key, by the path fingerprint.
+    Runs after resolve_paths: the fingerprint is made of resolved first hops."""
+    started = time.monotonic()
+    now = datetime.now(timezone.utc)
+    args = {"since": now - timedelta(days=window_days)}
+    with conn.transaction(), conn.cursor() as cur:
+        nodes = {pubkey: last_seen >= args["since"] for pubkey, last_seen in cur.execute(
+            "SELECT pubkey, last_seen FROM node").fetchall()}
+        known = [(pubkey, frozenset(features)) for pubkey, features in cur.execute(
+            FEATURES_SQL + "SELECT s.pubkey, p.features FROM per_packet p JOIN ("
+            " SELECT packet_hash, pubkey FROM advert WHERE signature_ok"
+            " UNION ALL SELECT packet_hash, sender_pubkey FROM anon_request) s USING (packet_hash)", args).fetchall()]
+        # A key seen in an anonymous request is a real node even when its advert never reached us.
+        for pubkey, _ in known:
+            nodes.setdefault(pubkey, True)
+        targets = cur.execute(
+            FEATURES_SQL + "SELECT d.packet_hash, d.src_hash, p.features FROM per_packet p "
+            "JOIN direct_packet d USING (packet_hash)", args).fetchall()
+        if not targets:
+            return {}
+
+        params = origin.Params(unknown_weight=origin.unknown_weight_from_data(
+            {pubkey[:2] for pubkey in nodes}, {src_hash for _, src_hash, _ in targets}))
+        resolver = origin.OriginResolver(nodes, known, params)
+        evaluation = origin.evaluate(nodes, known, params).as_dict()
+        records, named = [], 0
+        for packet_hash, src_hash, features in targets:
+            ranked = resolver.resolve(src_hash, frozenset(features))
+            named += ranked[0][1] >= CONFIDENT and not origin.is_unknown(ranked[0][0])
+            for rank, (node_id, p) in enumerate(ranked[:3], start=1):
+                records.append((packet_hash, rank, None if origin.is_unknown(node_id) else node_id, p,
+                                "path_fingerprint", origin.METHOD_VERSION, now))
+
+        cur.execute("DELETE FROM origin_resolution WHERE packet_hash = ANY(%s)", ([t[0] for t in targets],))
+        cur.executemany(
+            "INSERT INTO origin_resolution (packet_hash, rank, pubkey, probability, method, method_version, computed_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)", records)
+        summary = {"nodes": len(nodes), "known_packets": len(known), "packets": len(targets),
+                   "seconds": round(time.monotonic() - started, 2), "resolved_share": round(named / len(targets), 4),
+                   "unknown_per_byte": round(params.unknown_weight, 3)}
+        cur.execute(
+            "INSERT INTO origin_run (computed_at, method_version, window_days, nodes, known_packets, packets, seconds,"
+            " resolved_share, evaluation) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (now, origin.METHOD_VERSION, window_days, summary["nodes"], summary["known_packets"], summary["packets"],
+             summary["seconds"], summary["resolved_share"], Jsonb(evaluation)))
+        cur.execute("DELETE FROM origin_run WHERE computed_at < %s", (now - timedelta(days=400),))
+    log.info("origin resolution: %s; evaluation %s", summary, evaluation)
     return summary

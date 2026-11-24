@@ -66,6 +66,7 @@ def analytics_loop(stop: threading.Event, every: timedelta, window_days: int) ->
         try:
             with connect() as conn:
                 jobs.resolve_paths(conn, window_days)
+                jobs.resolve_origins(conn, window_days)
         except Exception:
             log.exception("analytics run failed")
         stop.wait(every.total_seconds())

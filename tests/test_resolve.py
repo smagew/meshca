@@ -117,3 +117,11 @@ def test_evaluation_by_cutting_long_prefixes_matches_the_truth_based_figure():
 def test_evaluation_without_long_prefixes_has_nothing_to_score():
     nodes, paths, _ = tree_network(long_share=0.0, packets=200)
     assert evaluate(nodes, paths).as_dict()["hops"] == 0
+
+
+def test_unknown_repeater_seen_with_a_long_prefix_competes_with_a_known_one():
+    known, neighbour = key("aa", "01"), key("bb", "01")
+    # "aa77" fits no known node, yet it is the one that always precedes bb01; the known aa01 never does.
+    paths = {("aa77", "bb01"): 30, ("aa01",): 30, ("aa", "bb01"): 3}
+    r = Resolver([Node(known), Node(neighbour)]).resolve(paths)
+    assert r.hops[("aa", "bb01")][0][0][0] == unknown("aa77")
