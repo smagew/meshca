@@ -15,8 +15,9 @@ FLOOD = "route_type IN (0, 1)"
 
 
 class Board:
-    def __init__(self, uid: str, title: str, description: str) -> None:
-        self.uid, self.title, self.description = uid, title, description
+    def __init__(self, uid: str, title: str, description: str, time_from: str = "now-24h") -> None:
+        self.uid, self.title, self.description, self.time_from = uid, title, description, time_from
+        self.variables: list[dict] = []
         self.panels: list[dict] = []
         self.x = self.y = self.row_h = 0
 
@@ -28,22 +29,33 @@ class Board:
         self.row_h = max(self.row_h, h)
         return pos
 
-    def add(self, kind: str, title: str, sql: str, w: int, h: int, fmt: str = "table", description: str = "",
-            defaults: dict | None = None, options: dict | None = None, overrides: list | None = None) -> None:
+    def variable(self, name: str, label: str, query: str, multi: bool = True) -> None:
+        """A filter at the top of the dashboard. The query returns __text and __value; "all" is the default."""
+        self.variables.append({
+            "name": name, "label": label, "type": "query", "datasource": DS, "query": " ".join(query.split()),
+            "refresh": 2, "sort": 0, "multi": multi, "includeAll": True,
+            "current": {"selected": True, "text": ["All"] if multi else "All", "value": ["$__all"] if multi else "$__all"},
+        })
+
+    def add(self, kind: str, title: str, sql: str | list[str], w: int, h: int, fmt: str = "table",
+            description: str = "", defaults: dict | None = None, options: dict | None = None,
+            overrides: list | None = None) -> None:
+        queries = [sql] if isinstance(sql, str) else sql
         self.panels.append({
             "id": len(self.panels) + 1, "type": kind, "title": title, "description": description,
             "datasource": DS, "gridPos": self._place(w, h),
-            "targets": [{"refId": "A", "datasource": DS, "format": fmt, "rawQuery": True,
-                         "rawSql": " ".join(sql.split())}],
+            "targets": [{"refId": "ABCDEF"[i], "datasource": DS, "format": fmt, "rawQuery": True,
+                         "rawSql": " ".join(q.split())} for i, q in enumerate(queries)],
             "fieldConfig": {"defaults": defaults or {}, "overrides": overrides or []},
             "options": options or {},
         })
 
-    def stat(self, title: str, sql: str, unit: str = "none", description: str = "", thresholds: list | None = None) -> None:
+    def stat(self, title: str, sql: str, unit: str = "none", description: str = "", thresholds: list | None = None,
+             text: bool = False) -> None:
         steps = thresholds or [{"color": "text", "value": None}]
         self.add("stat", title, sql, 4, 4, description=description,
                  defaults={"unit": unit, "thresholds": {"mode": "absolute", "steps": steps}},
-                 options={"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+                 options={"reduceOptions": {"calcs": ["lastNotNull"], "fields": "/.*/" if text else "", "values": False},
                           "colorMode": "value", "graphMode": "none", "textMode": "value"})
 
     def bars_over_time(self, title: str, sql: str, w: int = 24, h: int = 8, description: str = "") -> None:
@@ -53,7 +65,7 @@ class Board:
                  options={"legend": {"displayMode": "table", "placement": "right", "calcs": ["sum"]},
                           "tooltip": {"mode": "multi", "sort": "desc"}})
 
-    def lines(self, title: str, sql: str, unit: str, w: int = 12, h: int = 8, description: str = "") -> None:
+    def lines(self, title: str, sql: str | list[str], unit: str, w: int = 12, h: int = 8, description: str = "") -> None:
         self.add("timeseries", title, sql, w, h, fmt="time_series", description=description,
                  defaults={"unit": unit, "custom": {"drawStyle": "line", "lineWidth": 1, "showPoints": "auto",
                                                     "spanNulls": False}},
@@ -62,6 +74,41 @@ class Board:
     def table(self, title: str, sql: str, w: int = 24, h: int = 10, description: str = "") -> None:
         self.add("table", title, sql, w, h, description=description,
                  defaults={"custom": {"filterable": True}}, options={"cellHeight": "sm", "showHeader": True})
+
+    def heat_table(self, title: str, sql: str, label_column: str, w: int = 24, h: int = 9, description: str = "") -> None:
+        """A table whose numeric cells are shaded by value: one scale for the whole table."""
+        self.add("table", title, sql, w, h, description=description,
+                 defaults={"min": 0, "color": {"mode": "thresholds"},
+                           "thresholds": {"mode": "percentage", "steps": [
+                               {"color": "transparent", "value": None}, {"color": "#1f4e79", "value": 0.0001},
+                               {"color": "#2a7ab9", "value": 20}, {"color": "#7b5ea7", "value": 40},
+                               {"color": "#c0508a", "value": 60}, {"color": "#e0752d", "value": 80}]},
+                           "custom": {"align": "center", "width": 52, "cellOptions": {"type": "color-background", "mode": "basic"}}},
+                 overrides=[{"matcher": {"id": "byName", "options": label_column},
+                             "properties": [{"id": "custom.cellOptions", "value": {"type": "auto"}},
+                                            {"id": "custom.align", "value": "left"},
+                                            {"id": "custom.width", "value": 90}]}],
+                 options={"cellHeight": "sm", "showHeader": True})
+
+    def geomap(self, title: str, layers: list[tuple[str, str, str]], w: int = 24, h: int = 18,
+               description: str = "") -> None:
+        """One marker layer per (name, colour, query): the layer list of the map then works as the legend."""
+        self.add("geomap", title, [sql for _, _, sql in layers], w, h, description=description,
+                 options={"view": {"id": "fit", "allLayers": True, "padding": 40, "maxZoom": 13},
+                          "basemap": {"type": "default", "name": "Карта"},
+                          "controls": {"showZoom": True, "mouseWheelZoom": True, "showScale": True,
+                                       "showLayercontrol": True},
+                          "tooltip": {"mode": "details"},
+                          "layers": [{"type": "markers", "name": name, "tooltip": True,
+                                      "filterData": {"id": "byRefId", "options": "ABCDEF"[i]},
+                                      "location": {"mode": "coords", "latitude": "lat", "longitude": "lon"},
+                                      "config": {"showLegend": False, "style": {
+                                          "color": {"fixed": color}, "opacity": 0.85, "size": {"fixed": 7},
+                                          "symbol": {"mode": "fixed", "fixed": "img/icons/marker/circle.svg"},
+                                          "text": {"mode": "field", "field": "имя", "fixed": ""},
+                                          "textConfig": {"fontSize": 11, "offsetX": 0, "offsetY": -12,
+                                                         "textAlign": "center", "textBaseline": "bottom"}}}}
+                                     for i, (name, color, _) in enumerate(layers)]})
 
     def bars(self, title: str, sql: str, w: int = 12, h: int = 8, description: str = "") -> None:
         self.add("barchart", title, sql, w, h, description=description, defaults={"min": 0},
@@ -78,13 +125,15 @@ class Board:
                  for u, t in BOARDS if u != self.uid]
         doc = {"uid": self.uid, "title": self.title, "description": self.description, "tags": ["meshca"],
                "timezone": "browser", "editable": False, "graphTooltip": 1, "schemaVersion": 39, "version": 1,
-               "refresh": "1m", "time": {"from": "now-24h", "to": "now"}, "links": links, "panels": self.panels}
+               "refresh": "1m", "time": {"from": self.time_from, "to": "now"}, "links": links,
+               "templating": {"list": self.variables}, "panels": self.panels}
         (OUT / f"{self.uid.removeprefix('meshca-')}.json").write_text(
             json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 
 
 BOARDS = [("meshca-overview", "meshca · Обзор"), ("meshca-nodes", "meshca · Узлы"),
-          ("meshca-relays", "meshca · Ретрансляторы"), ("meshca-channels", "meshca · Каналы")]
+          ("meshca-relays", "meshca · Ретрансляторы"), ("meshca-channels", "meshca · Каналы"),
+          ("meshca-radio", "meshca · Радио"), ("meshca-rhythm", "meshca · Ритм"), ("meshca-map", "meshca · Карта")]
 
 ONE_POINT = "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer."
 
@@ -137,6 +186,11 @@ def overview() -> Board:
 def nodes() -> Board:
     b = Board(*BOARDS[1], ONE_POINT + " Отправитель известен точно только у объявлений, анонимных запросов и "
               "расшифрованных сообщений каналов; имя в сообщении канала протоколом не проверяется.")
+    b.variable("role", "Роль", """
+        SELECT * FROM (VALUES ('клиент', 1), ('ретранслятор', 2), ('сервер комнат', 3), ('датчик', 4),
+                              ('неизвестно', 0)) AS v(__text, __value)""")
+    b.variable("kind", "Вид пакета", """
+        SELECT k AS __text, k AS __value FROM (VALUES ('объявление'), ('сообщение канала'), ('анонимный запрос')) AS v(k)""")
     b.table("Кто сколько отправил", f"""
         SELECT s.sender AS "отправитель",
                count(*) FILTER (WHERE s.kind = 'объявление') AS "объявления",
@@ -145,10 +199,12 @@ def nodes() -> Board:
                count(*) AS "всего",
                round(extract(epoch FROM max(p.first_seen) - min(p.first_seen)) / 60 / nullif(count(*) - 1, 0)) AS "средний интервал, мин",
                min(p.first_seen) AS "первый", max(p.first_seen) AS "последний"
-        FROM v_sender s JOIN packet p ON p.hash = s.packet_hash WHERE {T}(p.first_seen)
+        FROM v_sender s JOIN packet p ON p.hash = s.packet_hash LEFT JOIN node n ON n.pubkey = s.pubkey
+        WHERE {T}(p.first_seen) AND coalesce(n.role, 0) IN (${{role:csv}}) AND s.kind IN (${{kind:sqlstring}})
         GROUP BY 1 ORDER BY "всего" DESC LIMIT 300""", h=12,
-        description="Уникальные пакеты за выбранный период. Личные сообщения сюда не входят: у них виден только "
-                    "однобайтовый хеш отправителя (таблица ниже).")
+        description="Уникальные пакеты за выбранный период, с учётом фильтров вверху. Роль известна только у узлов "
+                    "из справочника: у отправителя сообщения канала видно одно имя, его роль «неизвестно». "
+                    "Личные сообщения сюда не входят: у них виден только однобайтовый хеш отправителя (таблица ниже).")
     b.bars_over_time("Пакеты самых активных отправителей", f"""
         SELECT $__timeGroupAlias(p.first_seen, $__interval), s.sender AS metric, count(*) AS value
         FROM v_sender s JOIN packet p ON p.hash = s.packet_hash
@@ -168,7 +224,7 @@ def nodes() -> Board:
         SELECT name AS "имя", node_role_name(role) AS "роль", lat AS "широта", lon AS "долгота",
                advert_count AS "объявлений", first_seen AS "впервые", last_seen AS "последний раз",
                left(pubkey, 12) AS "ключ"
-        FROM node ORDER BY last_seen DESC LIMIT 1000""", h=12,
+        FROM node WHERE coalesce(role, 0) IN (${role:csv}) ORDER BY last_seen DESC LIMIT 1000""", h=12,
         description="За всё время сбора, только по объявлениям с верной подписью.")
     b.table("Личные пакеты по хешу отправителя", f"""
         SELECT d.src_hash AS "хеш отправителя", payload_type_name(p.payload_type) AS "тип", count(*) AS "пакетов",
@@ -270,8 +326,123 @@ def channels() -> Board:
     return b
 
 
+def radio() -> Board:
+    b = Board(*BOARDS[4], ONE_POINT + " Счётчики радио присылает сам observer раз в пять минут.")
+    delta = "v_observer_stats_delta"
+    b.stat("Занятость эфира", f"SELECT 100.0 * sum(d_rx_air) / nullif(sum(d_uptime), 0) FROM {delta} WHERE {T}(ingested_at)",
+           unit="percent", description="Доля времени, когда радио observer'а принимало сигнал, по его собственному счётчику.",
+           thresholds=[{"color": "green", "value": None}, {"color": "orange", "value": 10}, {"color": "red", "value": 25}])
+    b.stat("Принято с ошибкой",
+           f"SELECT 100.0 * sum(d_recv_errors) / nullif(sum(d_recv + d_recv_errors), 0) FROM {delta} WHERE {T}(ingested_at)",
+           unit="percent", description="Доля пакетов, которые радио начало принимать, но не смогло прочитать: "
+                                       "слабый сигнал или наложение передач. Такие пакеты в сбор не попадают.",
+           thresholds=[{"color": "green", "value": None}, {"color": "orange", "value": 5}, {"color": "red", "value": 15}])
+    b.stat("Уровень шума", "SELECT noise_floor FROM v_observer_stats ORDER BY ingested_at DESC LIMIT 1", unit="dBm")
+    b.stat("Средний пакет в эфире", f"""
+        SELECT avg(lora_airtime_ms(r.packet_len, v.sf, v.bw_khz, v.cr)) FROM reception r CROSS JOIN v_radio v
+        WHERE {T}(r.received_at)""", unit="ms",
+        description="Расчётная длительность передачи одного пакета при настройках радио observer'а.")
+    b.stat("Настройки радио", "SELECT freq_mhz || ' МГц · ' || bw_khz || ' кГц · SF' || sf || ' · CR 4/' || cr FROM v_radio", text=True)
+    b.stat("Питание", "SELECT battery_mv / 1000 FROM v_observer_stats ORDER BY ingested_at DESC LIMIT 1", unit="volt")
+    b.lines("Занятость эфира", [f"""
+        SELECT $__timeGroupAlias(ingested_at, $__interval), 'по счётчику радио' AS metric,
+               100.0 * sum(d_rx_air) / nullif(sum(d_uptime), 0) AS value
+        FROM {delta} WHERE {T}(ingested_at) GROUP BY 1 ORDER BY 1""", f"""
+        SELECT $__timeGroupAlias(r.received_at, $__interval), 'по разобранным пакетам' AS metric,
+               100.0 * sum(lora_airtime_ms(r.packet_len, v.sf, v.bw_khz, v.cr)) / $__interval_ms AS value
+        FROM reception r CROSS JOIN v_radio v WHERE {T}(r.received_at) GROUP BY 1 ORDER BY 1"""], "percent",
+        description="Счётчик радио учитывает всё, что оно слышало, включая непрочитанное. Вторая линия — расчёт по "
+                    "принятым пакетам; разница между ними — передачи, которые прочитать не удалось.")
+    b.lines("Принято с ошибкой", f"""
+        SELECT $__timeGroupAlias(ingested_at, $__interval), 'доля ошибок' AS metric,
+               100.0 * sum(d_recv_errors) / nullif(sum(d_recv + d_recv_errors), 0) AS value
+        FROM {delta} WHERE {T}(ingested_at) GROUP BY 1 ORDER BY 1""", "percent")
+    b.lines("Уровень шума", f"""
+        SELECT $__timeGroupAlias(ingested_at, $__interval), 'шум' AS metric, avg(noise_floor) AS value
+        FROM v_observer_stats WHERE {T}(ingested_at) GROUP BY 1 ORDER BY 1""", "dBm")
+    b.lines("Уровень сигнала соседей (RSSI)", f"""
+        SELECT $__timeGroupAlias(r.received_at, $__interval), coalesce(pn.name, r.last_hop, 'напрямую') AS metric,
+               avg(r.rssi) AS value
+        FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop
+        WHERE {T}(r.received_at) AND r.{FLOOD} GROUP BY 1, 2 ORDER BY 1""", "dBm")
+    b.table("Сигнал по соседям", f"""
+        SELECT coalesce(pn.name, '—') AS "узел", coalesce(r.last_hop, 'сам отправитель') AS "префикс", count(*) AS "приёмов",
+               min(r.rssi) AS "RSSI мин", round(avg(r.rssi)) AS "RSSI средн", max(r.rssi) AS "RSSI макс",
+               round(min(r.snr)::numeric, 1) AS "SNR мин", round(avg(r.snr)::numeric, 1) AS "SNR средн",
+               round(max(r.snr)::numeric, 1) AS "SNR макс"
+        FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop
+        WHERE {T}(r.received_at) AND r.{FLOOD} GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50""", h=8)
+    b.bars_over_time("Эфирное время по типам пакетов, секунд", f"""
+        SELECT $__timeGroupAlias(r.received_at, $__interval), payload_type_name(p.payload_type) AS metric,
+               sum(lora_airtime_ms(r.packet_len, v.sf, v.bw_khz, v.cr)) / 1000 AS value
+        FROM reception r JOIN packet p ON p.hash = r.packet_hash CROSS JOIN v_radio v
+        WHERE {T}(r.received_at) GROUP BY 1, 2 ORDER BY 1""",
+        description="Какие типы пакетов занимают эфир вокруг observer'а.")
+    return b
+
+
+def rhythm() -> Board:
+    b = Board(*BOARDS[5], ONE_POINT + " Часы и дни недели считаются в часовом поясе из настройки MESHCA_TIMEZONE.",
+              time_from="now-7d")
+    b.variable("ptype", "Тип пакета", """
+        SELECT payload_type_name(t::smallint) AS __text, t AS __value
+        FROM unnest(ARRAY[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15]) AS t""")
+    b.variable("sender", "Отправитель", "SELECT DISTINCT sender AS __text, sender AS __value FROM v_sender ORDER BY 1")
+    days = "(ARRAY['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'])[extract(isodow FROM {t})::int]"
+    hours = ", ".join(f"nullif(count(*) FILTER (WHERE extract(hour FROM {{t}}) = {h}), 0) AS \"{h:02d}\"" for h in range(24))
+
+    def by_day_and_hour(source: str, t: str) -> str:
+        return (f"SELECT {days.format(t=t)} AS \"день\", {hours.format(t=t)} {source} "
+                f"GROUP BY extract(isodow FROM {t}) ORDER BY extract(isodow FROM {t})")
+
+    b.heat_table("Вся сеть: пакеты по дням недели и часам",
+                 by_day_and_hour(f"FROM packet p WHERE {T}(p.first_seen) AND p.payload_type IN (${{ptype:csv}})", "p.first_seen"),
+                 "день", description="Уникальные пакеты выбранных типов. Столбцы — часы суток.")
+    b.heat_table("Выбранные отправители: пакеты по дням недели и часам",
+                 by_day_and_hour(f"FROM v_sender s JOIN packet p ON p.hash = s.packet_hash WHERE {T}(p.first_seen) "
+                                 f"AND p.payload_type IN (${{ptype:csv}}) AND s.sender IN (${{sender:sqlstring}})",
+                                 "p.first_seen"),
+                 "день", description="Только пакеты с известным отправителем: объявления, анонимные запросы, сообщения каналов.")
+    b.bars("По дням недели", f"""
+        SELECT {days.format(t="first_seen")} AS "день", count(*) AS "пакетов" FROM packet
+        WHERE {T}(first_seen) AND payload_type IN (${{ptype:csv}})
+        GROUP BY extract(isodow FROM first_seen) ORDER BY extract(isodow FROM first_seen)""")
+    b.bars("По часам суток", f"""
+        SELECT lpad(extract(hour FROM first_seen)::text, 2, '0') AS "час", count(*) AS "пакетов" FROM packet
+        WHERE {T}(first_seen) AND payload_type IN (${{ptype:csv}}) GROUP BY 1 ORDER BY 1""")
+    b.table("Насколько регулярно узлы объявляют о себе", f"""
+        SELECT coalesce(n.name, left(x.pubkey, 8)) AS "узел", node_role_name(n.role) AS "роль", count(*) + 1 AS "объявлений",
+               round(percentile_cont(0.5) WITHIN GROUP (ORDER BY x.gap) / 60) AS "медианный интервал, мин",
+               round((stddev_samp(x.gap) / nullif(avg(x.gap), 0))::numeric, 2) AS "разброс интервала"
+        FROM (SELECT a.pubkey, extract(epoch FROM p.first_seen - lag(p.first_seen) OVER (PARTITION BY a.pubkey ORDER BY p.first_seen)) AS gap
+              FROM advert a JOIN packet p ON p.hash = a.packet_hash WHERE a.signature_ok AND {T}(p.first_seen)) x
+        LEFT JOIN node n ON n.pubkey = x.pubkey WHERE x.gap IS NOT NULL
+        GROUP BY x.pubkey, n.name, n.role HAVING count(*) >= 2 ORDER BY 5 NULLS LAST LIMIT 300""", h=12,
+        description="Разброс — отношение стандартного отклонения интервала к среднему. Около 0: узел объявляет о себе "
+                    "по расписанию. Около 1 и больше: нерегулярно, например вручную или при перемещении. "
+                    "Пропущенные нами объявления увеличивают разброс.")
+    return b
+
+
+def node_map() -> Board:
+    b = Board(*BOARDS[6], "Узлы, которые сообщили свои координаты в объявлении. Подложку карты браузер загружает "
+              "из интернета.", time_from="now-7d")
+    roles = [("ретрансляторы", "green", "= 2"), ("клиенты", "blue", "= 1"), ("серверы комнат", "purple", "= 3"),
+             ("датчики и прочие", "orange", "NOT IN (1, 2, 3)")]
+    b.geomap("Узлы с координатами", [(name, color, f"""
+        SELECT name AS "имя", lat, lon, advert_count AS "объявлений", last_seen AS "последний раз"
+        FROM node WHERE lat IS NOT NULL AND {T}(last_seen) AND coalesce(role, 0) {condition}""")
+        for name, color, condition in roles],
+        description="Узлы, объявлявшие о себе за выбранный период. Зелёные — ретрансляторы, синие — клиенты, "
+                    "фиолетовые — серверы комнат, оранжевые — датчики и прочие.")
+    b.table("Узлы без координат", f"""
+        SELECT name AS "имя", node_role_name(role) AS "роль", advert_count AS "объявлений", last_seen AS "последний раз"
+        FROM node WHERE lat IS NULL AND {T}(last_seen) ORDER BY last_seen DESC LIMIT 500""", h=8)
+    return b
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for build in (overview, nodes, relays, channels):
+    for build in (overview, nodes, relays, channels, radio, rhythm, node_map):
         build().save()
     print("written:", ", ".join(sorted(p.name for p in OUT.glob("*.json"))))

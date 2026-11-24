@@ -1,0 +1,438 @@
+{
+ "uid": "meshca-rhythm",
+ "title": "meshca · Ритм",
+ "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Часы и дни недели считаются в часовом поясе из настройки MESHCA_TIMEZONE.",
+ "tags": [
+  "meshca"
+ ],
+ "timezone": "browser",
+ "editable": false,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "links": [
+  {
+   "type": "link",
+   "title": "meshca · Обзор",
+   "url": "/d/meshca-overview",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Узлы",
+   "url": "/d/meshca-nodes",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ретрансляторы",
+   "url": "/d/meshca-relays",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Каналы",
+   "url": "/d/meshca-channels",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Радио",
+   "url": "/d/meshca-radio",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Карта",
+   "url": "/d/meshca-map",
+   "keepTime": true,
+   "icon": "dashboard"
+  }
+ ],
+ "templating": {
+  "list": [
+   {
+    "name": "ptype",
+    "label": "Тип пакета",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "meshca"
+    },
+    "query": "SELECT payload_type_name(t::smallint) AS __text, t AS __value FROM unnest(ARRAY[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15]) AS t",
+    "refresh": 2,
+    "sort": 0,
+    "multi": true,
+    "includeAll": true,
+    "current": {
+     "selected": true,
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    }
+   },
+   {
+    "name": "sender",
+    "label": "Отправитель",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "meshca"
+    },
+    "query": "SELECT DISTINCT sender AS __text, sender AS __value FROM v_sender ORDER BY 1",
+    "refresh": 2,
+    "sort": 0,
+    "multi": true,
+    "includeAll": true,
+    "current": {
+     "selected": true,
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    }
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "table",
+   "title": "Вся сеть: пакеты по дням недели и часам",
+   "description": "Уникальные пакеты выбранных типов. Столбцы — часы суток.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT (ARRAY['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'])[extract(isodow FROM p.first_seen)::int] AS \"день\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 0), 0) AS \"00\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 1), 0) AS \"01\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 2), 0) AS \"02\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 3), 0) AS \"03\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 4), 0) AS \"04\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 5), 0) AS \"05\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 6), 0) AS \"06\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 7), 0) AS \"07\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 8), 0) AS \"08\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 9), 0) AS \"09\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 10), 0) AS \"10\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 11), 0) AS \"11\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 12), 0) AS \"12\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 13), 0) AS \"13\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 14), 0) AS \"14\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 15), 0) AS \"15\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 16), 0) AS \"16\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 17), 0) AS \"17\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 18), 0) AS \"18\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 19), 0) AS \"19\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 20), 0) AS \"20\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 21), 0) AS \"21\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 22), 0) AS \"22\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 23), 0) AS \"23\" FROM packet p WHERE $__timeFilter(p.first_seen) AND p.payload_type IN (${ptype:csv}) GROUP BY extract(isodow FROM p.first_seen) ORDER BY extract(isodow FROM p.first_seen)"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "percentage",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "#1f4e79",
+        "value": 0.0001
+       },
+       {
+        "color": "#2a7ab9",
+        "value": 20
+       },
+       {
+        "color": "#7b5ea7",
+        "value": 40
+       },
+       {
+        "color": "#c0508a",
+        "value": 60
+       },
+       {
+        "color": "#e0752d",
+        "value": 80
+       }
+      ]
+     },
+     "custom": {
+      "align": "center",
+      "width": 52,
+      "cellOptions": {
+       "type": "color-background",
+       "mode": "basic"
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "день"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "auto"
+        }
+       },
+       {
+        "id": "custom.align",
+        "value": "left"
+       },
+       {
+        "id": "custom.width",
+        "value": 90
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 2,
+   "type": "table",
+   "title": "Выбранные отправители: пакеты по дням недели и часам",
+   "description": "Только пакеты с известным отправителем: объявления, анонимные запросы, сообщения каналов.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 9,
+    "w": 24,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT (ARRAY['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'])[extract(isodow FROM p.first_seen)::int] AS \"день\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 0), 0) AS \"00\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 1), 0) AS \"01\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 2), 0) AS \"02\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 3), 0) AS \"03\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 4), 0) AS \"04\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 5), 0) AS \"05\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 6), 0) AS \"06\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 7), 0) AS \"07\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 8), 0) AS \"08\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 9), 0) AS \"09\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 10), 0) AS \"10\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 11), 0) AS \"11\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 12), 0) AS \"12\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 13), 0) AS \"13\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 14), 0) AS \"14\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 15), 0) AS \"15\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 16), 0) AS \"16\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 17), 0) AS \"17\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 18), 0) AS \"18\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 19), 0) AS \"19\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 20), 0) AS \"20\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 21), 0) AS \"21\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 22), 0) AS \"22\", nullif(count(*) FILTER (WHERE extract(hour FROM p.first_seen) = 23), 0) AS \"23\" FROM v_sender s JOIN packet p ON p.hash = s.packet_hash WHERE $__timeFilter(p.first_seen) AND p.payload_type IN (${ptype:csv}) AND s.sender IN (${sender:sqlstring}) GROUP BY extract(isodow FROM p.first_seen) ORDER BY extract(isodow FROM p.first_seen)"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "percentage",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "#1f4e79",
+        "value": 0.0001
+       },
+       {
+        "color": "#2a7ab9",
+        "value": 20
+       },
+       {
+        "color": "#7b5ea7",
+        "value": 40
+       },
+       {
+        "color": "#c0508a",
+        "value": 60
+       },
+       {
+        "color": "#e0752d",
+        "value": 80
+       }
+      ]
+     },
+     "custom": {
+      "align": "center",
+      "width": 52,
+      "cellOptions": {
+       "type": "color-background",
+       "mode": "basic"
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "день"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "auto"
+        }
+       },
+       {
+        "id": "custom.align",
+        "value": "left"
+       },
+       {
+        "id": "custom.width",
+        "value": 90
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 3,
+   "type": "barchart",
+   "title": "По дням недели",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 18,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT (ARRAY['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'])[extract(isodow FROM first_seen)::int] AS \"день\", count(*) AS \"пакетов\" FROM packet WHERE $__timeFilter(first_seen) AND payload_type IN (${ptype:csv}) GROUP BY extract(isodow FROM first_seen) ORDER BY extract(isodow FROM first_seen)"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "xTickLabelRotation": 0,
+    "showValue": "auto"
+   }
+  },
+  {
+   "id": 4,
+   "type": "barchart",
+   "title": "По часам суток",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 18,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT lpad(extract(hour FROM first_seen)::text, 2, '0') AS \"час\", count(*) AS \"пакетов\" FROM packet WHERE $__timeFilter(first_seen) AND payload_type IN (${ptype:csv}) GROUP BY 1 ORDER BY 1"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "xTickLabelRotation": 0,
+    "showValue": "auto"
+   }
+  },
+  {
+   "id": 5,
+   "type": "table",
+   "title": "Насколько регулярно узлы объявляют о себе",
+   "description": "Разброс — отношение стандартного отклонения интервала к среднему. Около 0: узел объявляет о себе по расписанию. Около 1 и больше: нерегулярно, например вручную или при перемещении. Пропущенные нами объявления увеличивают разброс.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 26,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT coalesce(n.name, left(x.pubkey, 8)) AS \"узел\", node_role_name(n.role) AS \"роль\", count(*) + 1 AS \"объявлений\", round(percentile_cont(0.5) WITHIN GROUP (ORDER BY x.gap) / 60) AS \"медианный интервал, мин\", round((stddev_samp(x.gap) / nullif(avg(x.gap), 0))::numeric, 2) AS \"разброс интервала\" FROM (SELECT a.pubkey, extract(epoch FROM p.first_seen - lag(p.first_seen) OVER (PARTITION BY a.pubkey ORDER BY p.first_seen)) AS gap FROM advert a JOIN packet p ON p.hash = a.packet_hash WHERE a.signature_ok AND $__timeFilter(p.first_seen)) x LEFT JOIN node n ON n.pubkey = x.pubkey WHERE x.gap IS NOT NULL GROUP BY x.pubkey, n.name, n.role HAVING count(*) >= 2 ORDER BY 5 NULLS LAST LIMIT 300"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  }
+ ]
+}

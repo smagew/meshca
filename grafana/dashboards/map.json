@@ -1,0 +1,360 @@
+{
+ "uid": "meshca-map",
+ "title": "meshca · Карта",
+ "description": "Узлы, которые сообщили свои координаты в объявлении. Подложку карты браузер загружает из интернета.",
+ "tags": [
+  "meshca"
+ ],
+ "timezone": "browser",
+ "editable": false,
+ "graphTooltip": 1,
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "links": [
+  {
+   "type": "link",
+   "title": "meshca · Обзор",
+   "url": "/d/meshca-overview",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Узлы",
+   "url": "/d/meshca-nodes",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ретрансляторы",
+   "url": "/d/meshca-relays",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Каналы",
+   "url": "/d/meshca-channels",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Радио",
+   "url": "/d/meshca-radio",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ритм",
+   "url": "/d/meshca-rhythm",
+   "keepTime": true,
+   "icon": "dashboard"
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "geomap",
+   "title": "Узлы с координатами",
+   "description": "Узлы, объявлявшие о себе за выбранный период. Зелёные — ретрансляторы, синие — клиенты, фиолетовые — серверы комнат, оранжевые — датчики и прочие.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 18
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"имя\", lat, lon, advert_count AS \"объявлений\", last_seen AS \"последний раз\" FROM node WHERE lat IS NOT NULL AND $__timeFilter(last_seen) AND coalesce(role, 0) = 2"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"имя\", lat, lon, advert_count AS \"объявлений\", last_seen AS \"последний раз\" FROM node WHERE lat IS NOT NULL AND $__timeFilter(last_seen) AND coalesce(role, 0) = 1"
+    },
+    {
+     "refId": "C",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"имя\", lat, lon, advert_count AS \"объявлений\", last_seen AS \"последний раз\" FROM node WHERE lat IS NOT NULL AND $__timeFilter(last_seen) AND coalesce(role, 0) = 3"
+    },
+    {
+     "refId": "D",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"имя\", lat, lon, advert_count AS \"объявлений\", last_seen AS \"последний раз\" FROM node WHERE lat IS NOT NULL AND $__timeFilter(last_seen) AND coalesce(role, 0) NOT IN (1, 2, 3)"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {
+    "view": {
+     "id": "fit",
+     "allLayers": true,
+     "padding": 40,
+     "maxZoom": 13
+    },
+    "basemap": {
+     "type": "default",
+     "name": "Карта"
+    },
+    "controls": {
+     "showZoom": true,
+     "mouseWheelZoom": true,
+     "showScale": true,
+     "showLayercontrol": true
+    },
+    "tooltip": {
+     "mode": "details"
+    },
+    "layers": [
+     {
+      "type": "markers",
+      "name": "ретрансляторы",
+      "tooltip": true,
+      "filterData": {
+       "id": "byRefId",
+       "options": "A"
+      },
+      "location": {
+       "mode": "coords",
+       "latitude": "lat",
+       "longitude": "lon"
+      },
+      "config": {
+       "showLegend": false,
+       "style": {
+        "color": {
+         "fixed": "green"
+        },
+        "opacity": 0.85,
+        "size": {
+         "fixed": 7
+        },
+        "symbol": {
+         "mode": "fixed",
+         "fixed": "img/icons/marker/circle.svg"
+        },
+        "text": {
+         "mode": "field",
+         "field": "имя",
+         "fixed": ""
+        },
+        "textConfig": {
+         "fontSize": 11,
+         "offsetX": 0,
+         "offsetY": -12,
+         "textAlign": "center",
+         "textBaseline": "bottom"
+        }
+       }
+      }
+     },
+     {
+      "type": "markers",
+      "name": "клиенты",
+      "tooltip": true,
+      "filterData": {
+       "id": "byRefId",
+       "options": "B"
+      },
+      "location": {
+       "mode": "coords",
+       "latitude": "lat",
+       "longitude": "lon"
+      },
+      "config": {
+       "showLegend": false,
+       "style": {
+        "color": {
+         "fixed": "blue"
+        },
+        "opacity": 0.85,
+        "size": {
+         "fixed": 7
+        },
+        "symbol": {
+         "mode": "fixed",
+         "fixed": "img/icons/marker/circle.svg"
+        },
+        "text": {
+         "mode": "field",
+         "field": "имя",
+         "fixed": ""
+        },
+        "textConfig": {
+         "fontSize": 11,
+         "offsetX": 0,
+         "offsetY": -12,
+         "textAlign": "center",
+         "textBaseline": "bottom"
+        }
+       }
+      }
+     },
+     {
+      "type": "markers",
+      "name": "серверы комнат",
+      "tooltip": true,
+      "filterData": {
+       "id": "byRefId",
+       "options": "C"
+      },
+      "location": {
+       "mode": "coords",
+       "latitude": "lat",
+       "longitude": "lon"
+      },
+      "config": {
+       "showLegend": false,
+       "style": {
+        "color": {
+         "fixed": "purple"
+        },
+        "opacity": 0.85,
+        "size": {
+         "fixed": 7
+        },
+        "symbol": {
+         "mode": "fixed",
+         "fixed": "img/icons/marker/circle.svg"
+        },
+        "text": {
+         "mode": "field",
+         "field": "имя",
+         "fixed": ""
+        },
+        "textConfig": {
+         "fontSize": 11,
+         "offsetX": 0,
+         "offsetY": -12,
+         "textAlign": "center",
+         "textBaseline": "bottom"
+        }
+       }
+      }
+     },
+     {
+      "type": "markers",
+      "name": "датчики и прочие",
+      "tooltip": true,
+      "filterData": {
+       "id": "byRefId",
+       "options": "D"
+      },
+      "location": {
+       "mode": "coords",
+       "latitude": "lat",
+       "longitude": "lon"
+      },
+      "config": {
+       "showLegend": false,
+       "style": {
+        "color": {
+         "fixed": "orange"
+        },
+        "opacity": 0.85,
+        "size": {
+         "fixed": 7
+        },
+        "symbol": {
+         "mode": "fixed",
+         "fixed": "img/icons/marker/circle.svg"
+        },
+        "text": {
+         "mode": "field",
+         "field": "имя",
+         "fixed": ""
+        },
+        "textConfig": {
+         "fontSize": 11,
+         "offsetX": 0,
+         "offsetY": -12,
+         "textAlign": "center",
+         "textBaseline": "bottom"
+        }
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": 2,
+   "type": "table",
+   "title": "Узлы без координат",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 18,
+    "w": 24,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT name AS \"имя\", node_role_name(role) AS \"роль\", advert_count AS \"объявлений\", last_seen AS \"последний раз\" FROM node WHERE lat IS NULL AND $__timeFilter(last_seen) ORDER BY last_seen DESC LIMIT 500"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  }
+ ]
+}

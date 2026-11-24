@@ -36,14 +36,85 @@
    "url": "/d/meshca-channels",
    "keepTime": true,
    "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Радио",
+   "url": "/d/meshca-radio",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Ритм",
+   "url": "/d/meshca-rhythm",
+   "keepTime": true,
+   "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Карта",
+   "url": "/d/meshca-map",
+   "keepTime": true,
+   "icon": "dashboard"
   }
  ],
+ "templating": {
+  "list": [
+   {
+    "name": "role",
+    "label": "Роль",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "meshca"
+    },
+    "query": "SELECT * FROM (VALUES ('клиент', 1), ('ретранслятор', 2), ('сервер комнат', 3), ('датчик', 4), ('неизвестно', 0)) AS v(__text, __value)",
+    "refresh": 2,
+    "sort": 0,
+    "multi": true,
+    "includeAll": true,
+    "current": {
+     "selected": true,
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    }
+   },
+   {
+    "name": "kind",
+    "label": "Вид пакета",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "meshca"
+    },
+    "query": "SELECT k AS __text, k AS __value FROM (VALUES ('объявление'), ('сообщение канала'), ('анонимный запрос')) AS v(k)",
+    "refresh": 2,
+    "sort": 0,
+    "multi": true,
+    "includeAll": true,
+    "current": {
+     "selected": true,
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    }
+   }
+  ]
+ },
  "panels": [
   {
    "id": 1,
    "type": "table",
    "title": "Кто сколько отправил",
-   "description": "Уникальные пакеты за выбранный период. Личные сообщения сюда не входят: у них виден только однобайтовый хеш отправителя (таблица ниже).",
+   "description": "Уникальные пакеты за выбранный период, с учётом фильтров вверху. Роль известна только у узлов из справочника: у отправителя сообщения канала видно одно имя, его роль «неизвестно». Личные сообщения сюда не входят: у них виден только однобайтовый хеш отправителя (таблица ниже).",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "meshca"
@@ -63,7 +134,7 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT s.sender AS \"отправитель\", count(*) FILTER (WHERE s.kind = 'объявление') AS \"объявления\", count(*) FILTER (WHERE s.kind = 'сообщение канала') AS \"сообщения каналов\", count(*) FILTER (WHERE s.kind = 'анонимный запрос') AS \"анонимные запросы\", count(*) AS \"всего\", round(extract(epoch FROM max(p.first_seen) - min(p.first_seen)) / 60 / nullif(count(*) - 1, 0)) AS \"средний интервал, мин\", min(p.first_seen) AS \"первый\", max(p.first_seen) AS \"последний\" FROM v_sender s JOIN packet p ON p.hash = s.packet_hash WHERE $__timeFilter(p.first_seen) GROUP BY 1 ORDER BY \"всего\" DESC LIMIT 300"
+     "rawSql": "SELECT s.sender AS \"отправитель\", count(*) FILTER (WHERE s.kind = 'объявление') AS \"объявления\", count(*) FILTER (WHERE s.kind = 'сообщение канала') AS \"сообщения каналов\", count(*) FILTER (WHERE s.kind = 'анонимный запрос') AS \"анонимные запросы\", count(*) AS \"всего\", round(extract(epoch FROM max(p.first_seen) - min(p.first_seen)) / 60 / nullif(count(*) - 1, 0)) AS \"средний интервал, мин\", min(p.first_seen) AS \"первый\", max(p.first_seen) AS \"последний\" FROM v_sender s JOIN packet p ON p.hash = s.packet_hash LEFT JOIN node n ON n.pubkey = s.pubkey WHERE $__timeFilter(p.first_seen) AND coalesce(n.role, 0) IN (${role:csv}) AND s.kind IN (${kind:sqlstring}) GROUP BY 1 ORDER BY \"всего\" DESC LIMIT 300"
     }
    ],
    "fieldConfig": {
@@ -241,7 +312,7 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT name AS \"имя\", node_role_name(role) AS \"роль\", lat AS \"широта\", lon AS \"долгота\", advert_count AS \"объявлений\", first_seen AS \"впервые\", last_seen AS \"последний раз\", left(pubkey, 12) AS \"ключ\" FROM node ORDER BY last_seen DESC LIMIT 1000"
+     "rawSql": "SELECT name AS \"имя\", node_role_name(role) AS \"роль\", lat AS \"широта\", lon AS \"долгота\", advert_count AS \"объявлений\", first_seen AS \"впервые\", last_seen AS \"последний раз\", left(pubkey, 12) AS \"ключ\" FROM node WHERE coalesce(role, 0) IN (${role:csv}) ORDER BY last_seen DESC LIMIT 1000"
     }
    ],
    "fieldConfig": {
