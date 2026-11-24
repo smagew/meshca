@@ -590,7 +590,7 @@
      },
      "format": "time_series",
      "rawQuery": true,
-     "rawSql": "SELECT $__timeGroupAlias(r.received_at, $__interval), coalesce(pn.name, r.last_hop, 'напрямую') AS metric, avg(r.rssi) AS value FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop WHERE $__timeFilter(r.received_at) AND r.route_type IN (0, 1) GROUP BY 1, 2 ORDER BY 1"
+     "rawSql": "SELECT $__timeGroupAlias(received_at, $__interval), label AS metric, avg(rssi) AS value FROM v_hop_resolved WHERE $__timeFilter(received_at) AND from_end = 0 GROUP BY 1, 2 ORDER BY 1"
     }
    ],
    "fieldConfig": {
@@ -639,7 +639,7 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT coalesce(pn.name, '—') AS \"узел\", coalesce(r.last_hop, 'сам отправитель') AS \"префикс\", count(*) AS \"приёмов\", min(r.rssi) AS \"RSSI мин\", round(avg(r.rssi)) AS \"RSSI средн\", max(r.rssi) AS \"RSSI макс\", round(min(r.snr)::numeric, 1) AS \"SNR мин\", round(avg(r.snr)::numeric, 1) AS \"SNR средн\", round(max(r.snr)::numeric, 1) AS \"SNR макс\" FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop WHERE $__timeFilter(r.received_at) AND r.route_type IN (0, 1) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50"
+     "rawSql": "SELECT label AS \"узел\", string_agg(DISTINCT prefix, ' ' ORDER BY prefix) AS \"префиксы\", count(*) AS \"приёмов\", min(rssi) AS \"RSSI мин\", round(avg(rssi)) AS \"RSSI средн\", max(rssi) AS \"RSSI макс\", round(min(snr)::numeric, 1) AS \"SNR мин\", round(avg(snr)::numeric, 1) AS \"SNR средн\", round(max(snr)::numeric, 1) AS \"SNR макс\" FROM v_hop_resolved WHERE $__timeFilter(received_at) AND from_end = 0 GROUP BY 1 ORDER BY 3 DESC LIMIT 50"
     }
    ],
    "fieldConfig": {

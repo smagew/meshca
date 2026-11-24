@@ -243,46 +243,81 @@ def nodes() -> Board:
 
 
 def relays() -> Board:
-    b = Board(*BOARDS[2], ONE_POINT + " Узел за префиксом назван, только если в справочнике ровно один ретранслятор "
-              "с таким началом ключа; иначе показано число кандидатов.")
+    b = Board(*BOARDS[2], ONE_POINT + " Узел за префиксом определяется расчётом: по тому, сколько трафика несёт кандидат, "
+              "кто стоит рядом с ним в путях и правдоподобно ли расстояние между ними. Имя показано при вероятности "
+              "от 0,7; иначе остаётся префикс со знаком вопроса. Расчёт идёт раз в час.")
     flood_packets = (f"(SELECT count(DISTINCT packet_hash) FROM reception "
                      f"WHERE {FLOOD} AND hop_count > 0 AND {T}(received_at))")
+    last_run = "(SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    b.stat("Шагов пути с определённым узлом", f"SELECT 100 * resolved_share FROM {last_run}", unit="percent",
+           description="Доля шагов в путях (с учётом числа пакетов), где узел назван с вероятностью от 0,7.",
+           thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 50}, {"color": "green", "value": 80}])
+    b.stat("Точность на проверке", f"SELECT 100 * (evaluation->>'accuracy')::numeric FROM {last_run}", unit="percent",
+           description="Проверка: у части путей с двухбайтовыми префиксами (где узел известен точно) префиксы обрезаются "
+                       "до одного байта, и метод должен найти узел заново. Это доля верных ответов в трудных случаях, "
+                       "когда под однобайтовый префикс подходит несколько известных узлов. Оценка занижена: обрезка "
+                       "убирает часть сведений, которые у настоящих коротких путей есть.",
+           thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 70}, {"color": "green", "value": 90}])
+    b.stat("Точность уверенных ответов", f"SELECT 100 * (evaluation->>'confident_accuracy')::numeric FROM {last_run}",
+           unit="percent", description="То же, но только среди ответов с вероятностью от 0,7: именно они показаны именами.",
+           thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 80}, {"color": "green", "value": 95}])
+    b.stat("Простое правило", f"SELECT 100 * (evaluation->>'baseline_accuracy')::numeric FROM {last_run}", unit="percent",
+           description="Для сравнения: точность правила «взять самого загруженного кандидата», без соседей и расстояний.")
+    b.stat("Случаев в проверке", f"SELECT (evaluation->>'hops')::int FROM {last_run}",
+           description="На скольких скрытых шагах измерена точность. При малом числе цифрам выше верить рано.")
+    b.stat("Последний расчёт", f"SELECT extract(epoch FROM now() - computed_at) FROM {last_run}", unit="s")
     b.table("Какие узлы чаще всего пересылают пакеты", f"""
-        SELECT coalesce(pn.name, '—') AS "узел", h.prefix AS "префикс", pn.candidates AS "кандидатов",
+        SELECT h.label AS "узел", min(h.status) AS "определение", string_agg(DISTINCT h.prefix, ' ' ORDER BY h.prefix) AS "префиксы",
                count(DISTINCT h.packet_hash) AS "пакетов",
                round(100.0 * count(DISTINCT h.packet_hash) / nullif({flood_packets}, 0), 1) AS "доля, %",
                count(DISTINCT h.packet_hash) FILTER (WHERE h.position = 1) AS "первым в пути",
-               round(avg(h.from_end), 1) AS "шагов до нас"
-        FROM v_hop h LEFT JOIN v_prefix_node pn ON pn.prefix = h.prefix WHERE {T}(h.received_at)
-        GROUP BY 1, 2, 3 ORDER BY "пакетов" DESC LIMIT 200""", h=12,
+               round(avg(h.from_end), 1) AS "шагов до нас", round(avg(h.probability)::numeric, 2) AS "вероятность"
+        FROM v_hop_resolved h WHERE {T}(h.received_at)
+        GROUP BY 1 ORDER BY "пакетов" DESC LIMIT 300""", h=12,
         description="Доля — от всех пакетов, пришедших через ретрансляторы. «Первым в пути» — узел стоял сразу после "
-                    "отправителя. «Шагов до нас»: 0 — прямой сосед observer'а. Один узел может встречаться дважды: "
-                    "с однобайтовым и двухбайтовым префиксом.")
+                    "отправителя. «Шагов до нас»: 0 — прямой сосед observer'а. Строки с «?» — префиксы, за которыми "
+                    "узел не определён или его нет в справочнике.")
     b.bars_over_time("Пакеты через главные ретрансляторы", f"""
-        SELECT $__timeGroupAlias(h.received_at, $__interval), coalesce(pn.name, h.prefix) AS metric,
-               count(DISTINCT h.packet_hash) AS value
-        FROM v_hop h LEFT JOIN v_prefix_node pn ON pn.prefix = h.prefix
-        WHERE {T}(h.received_at) AND h.prefix IN (
-            SELECT prefix FROM v_hop WHERE {T}(received_at) GROUP BY 1 ORDER BY count(DISTINCT packet_hash) DESC LIMIT 8)
+        SELECT $__timeGroupAlias(h.received_at, $__interval), h.label AS metric, count(DISTINCT h.packet_hash) AS value
+        FROM v_hop_resolved h
+        WHERE {T}(h.received_at) AND h.label IN (
+            SELECT label FROM v_hop_resolved WHERE {T}(received_at) GROUP BY 1 ORDER BY count(DISTINCT packet_hash) DESC LIMIT 8)
         GROUP BY 1, 2 ORDER BY 1""")
     b.table("Прямые соседи: кого слышит observer", f"""
-        SELECT coalesce(pn.name, '—') AS "узел", coalesce(r.last_hop, 'сам отправитель') AS "префикс",
-               count(*) AS "приёмов", count(DISTINCT r.packet_hash) AS "пакетов",
-               round(avg(r.rssi)) AS "RSSI, дБм", round(avg(r.snr)::numeric, 1) AS "SNR, дБ"
-        FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop
-        WHERE {T}(r.received_at) AND r.{FLOOD} GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50""", w=14, h=8)
+        SELECT h.label AS "узел", string_agg(DISTINCT h.prefix, ' ' ORDER BY h.prefix) AS "префиксы",
+               count(*) AS "приёмов", count(DISTINCT h.packet_hash) AS "пакетов",
+               round(avg(h.rssi)) AS "RSSI, дБм", round(avg(h.snr)::numeric, 1) AS "SNR, дБ"
+        FROM v_hop_resolved h WHERE {T}(h.received_at) AND h.from_end = 0
+        GROUP BY 1 ORDER BY 3 DESC LIMIT 50""", w=14, h=8)
     b.bars("Длина пути", f"""
         SELECT hop_count::text AS "ретрансляторов в пути", count(*) AS "приёмов" FROM reception
         WHERE {T}(received_at) AND {FLOOD} GROUP BY hop_count ORDER BY hop_count""", w=10)
+    b.table("Кто кого слышит", f"""
+        SELECT a.label AS "от узла", b.label AS "к узлу", count(DISTINCT a.packet_hash) AS "пакетов"
+        FROM v_hop_resolved a JOIN v_hop_resolved b ON b.reception_id = a.reception_id AND b.position = a.position + 1
+        WHERE {T}(a.received_at) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200""", w=12, h=10,
+        description="Соседние узлы в путях: правый узел принял пакет от левого и передал дальше. Основа будущего графа сети.")
+    b.table("Самые частые пути", f"""
+        SELECT string_agg(h.label, ' → ' ORDER BY h.position) AS "путь", count(*) AS "длина", max(x.packets) AS "пакетов"
+        FROM (SELECT path_key, min(id) AS id, count(DISTINCT packet_hash) AS packets FROM reception
+              WHERE {T}(received_at) AND {FLOOD} AND hop_count > 0 GROUP BY path_key ORDER BY 3 DESC LIMIT 100) x
+        JOIN v_hop_resolved h ON h.reception_id = x.id GROUP BY x.path_key ORDER BY 3 DESC""", w=12, h=10,
+        description="Слева — ближе к отправителю, справа — наш прямой сосед.")
     b.pie("Размер префикса в пути", f"""
         SELECT prefix_size || ' байт' AS metric, count(*) AS value FROM reception
         WHERE {T}(received_at) AND hop_count > 0 GROUP BY 1 ORDER BY 1""",
         description="Чем длиннее префикс, тем увереннее определяется узел.")
-    b.table("Самые частые пути", f"""
-        SELECT array_to_string(path, ' → ') AS "путь", hop_count AS "длина", count(DISTINCT packet_hash) AS "пакетов"
-        FROM reception WHERE {T}(received_at) AND {FLOOD} AND hop_count > 0
-        GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 100""", w=16, h=8,
-        description="Слева — ближе к отправителю, справа — наш прямой сосед.")
+    b.pie("Как определены шаги путей", f"""
+        SELECT status AS metric, count(*) AS value FROM v_hop_resolved WHERE {T}(received_at) GROUP BY 1 ORDER BY 2 DESC""")
+    b.lines("Точность определения по расчётам", f"""
+        SELECT computed_at AS time, 'точность на проверке' AS metric, 100 * (evaluation->>'accuracy')::numeric AS value
+        FROM resolution_run WHERE {T}(computed_at) AND evaluation->>'accuracy' IS NOT NULL
+        UNION ALL
+        SELECT computed_at, 'простое правило', 100 * (evaluation->>'baseline_accuracy')::numeric
+        FROM resolution_run WHERE {T}(computed_at) AND evaluation->>'baseline_accuracy' IS NOT NULL
+        UNION ALL
+        SELECT computed_at, 'доля определённых шагов', 100 * resolved_share
+        FROM resolution_run WHERE {T}(computed_at) AND resolved_share IS NOT NULL ORDER BY 1""", "percent", w=8)
     return b
 
 
@@ -361,17 +396,14 @@ def radio() -> Board:
         SELECT $__timeGroupAlias(ingested_at, $__interval), 'шум' AS metric, avg(noise_floor) AS value
         FROM v_observer_stats WHERE {T}(ingested_at) GROUP BY 1 ORDER BY 1""", "dBm")
     b.lines("Уровень сигнала соседей (RSSI)", f"""
-        SELECT $__timeGroupAlias(r.received_at, $__interval), coalesce(pn.name, r.last_hop, 'напрямую') AS metric,
-               avg(r.rssi) AS value
-        FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop
-        WHERE {T}(r.received_at) AND r.{FLOOD} GROUP BY 1, 2 ORDER BY 1""", "dBm")
+        SELECT $__timeGroupAlias(received_at, $__interval), label AS metric, avg(rssi) AS value
+        FROM v_hop_resolved WHERE {T}(received_at) AND from_end = 0 GROUP BY 1, 2 ORDER BY 1""", "dBm")
     b.table("Сигнал по соседям", f"""
-        SELECT coalesce(pn.name, '—') AS "узел", coalesce(r.last_hop, 'сам отправитель') AS "префикс", count(*) AS "приёмов",
-               min(r.rssi) AS "RSSI мин", round(avg(r.rssi)) AS "RSSI средн", max(r.rssi) AS "RSSI макс",
-               round(min(r.snr)::numeric, 1) AS "SNR мин", round(avg(r.snr)::numeric, 1) AS "SNR средн",
-               round(max(r.snr)::numeric, 1) AS "SNR макс"
-        FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop
-        WHERE {T}(r.received_at) AND r.{FLOOD} GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50""", h=8)
+        SELECT label AS "узел", string_agg(DISTINCT prefix, ' ' ORDER BY prefix) AS "префиксы", count(*) AS "приёмов",
+               min(rssi) AS "RSSI мин", round(avg(rssi)) AS "RSSI средн", max(rssi) AS "RSSI макс",
+               round(min(snr)::numeric, 1) AS "SNR мин", round(avg(snr)::numeric, 1) AS "SNR средн",
+               round(max(snr)::numeric, 1) AS "SNR макс"
+        FROM v_hop_resolved WHERE {T}(received_at) AND from_end = 0 GROUP BY 1 ORDER BY 3 DESC LIMIT 50""", h=8)
     b.bars_over_time("Эфирное время по типам пакетов, секунд", f"""
         SELECT $__timeGroupAlias(r.received_at, $__interval), payload_type_name(p.payload_type) AS metric,
                sum(lora_airtime_ms(r.packet_len, v.sf, v.bw_khz, v.cr)) / 1000 AS value

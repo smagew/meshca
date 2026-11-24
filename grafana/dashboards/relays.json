@@ -1,7 +1,7 @@
 {
  "uid": "meshca-relays",
  "title": "meshca · Ретрансляторы",
- "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Узел за префиксом назван, только если в справочнике ровно один ретранслятор с таким началом ключа; иначе показано число кандидатов.",
+ "description": "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer. Узел за префиксом определяется расчётом: по тому, сколько трафика несёт кандидат, кто стоит рядом с ним в путях и правдоподобно ли расстояние между ними. Имя показано при вероятности от 0,7; иначе остаётся префикс со знаком вопроса. Расчёт идёт раз в час.",
  "tags": [
   "meshca"
  ],
@@ -65,9 +65,9 @@
  "panels": [
   {
    "id": 1,
-   "type": "table",
-   "title": "Какие узлы чаще всего пересылают пакеты",
-   "description": "Доля — от всех пакетов, пришедших через ретрансляторы. «Первым в пути» — узел стоял сразу после отправителя. «Шагов до нас»: 0 — прямой сосед observer'а. Один узел может встречаться дважды: с однобайтовым и двухбайтовым префиксом.",
+   "type": "stat",
+   "title": "Шагов пути с определённым узлом",
+   "description": "Доля шагов в путях (с учётом числа пакетов), где узел назван с вероятностью от 0,7.",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "meshca"
@@ -75,6 +75,360 @@
    "gridPos": {
     "x": 0,
     "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * resolved_share FROM (SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 50
+       },
+       {
+        "color": "green",
+        "value": 80
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Точность на проверке",
+   "description": "Проверка: у части путей с двухбайтовыми префиксами (где узел известен точно) префиксы обрезаются до одного байта, и метод должен найти узел заново. Это доля верных ответов в трудных случаях, когда под однобайтовый префикс подходит несколько известных узлов. Оценка занижена: обрезка убирает часть сведений, которые у настоящих коротких путей есть.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * (evaluation->>'accuracy')::numeric FROM (SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 70
+       },
+       {
+        "color": "green",
+        "value": 90
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 3,
+   "type": "stat",
+   "title": "Точность уверенных ответов",
+   "description": "То же, но только среди ответов с вероятностью от 0,7: именно они показаны именами.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * (evaluation->>'confident_accuracy')::numeric FROM (SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 80
+       },
+       {
+        "color": "green",
+        "value": 95
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 4,
+   "type": "stat",
+   "title": "Простое правило",
+   "description": "Для сравнения: точность правила «взять самого загруженного кандидата», без соседей и расстояний.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT 100 * (evaluation->>'baseline_accuracy')::numeric FROM (SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 5,
+   "type": "stat",
+   "title": "Случаев в проверке",
+   "description": "На скольких скрытых шагах измерена точность. При малом числе цифрам выше верить рано.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT (evaluation->>'hops')::int FROM (SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 6,
+   "type": "stat",
+   "title": "Последний расчёт",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT extract(epoch FROM now() - computed_at) FROM (SELECT * FROM resolution_run ORDER BY id DESC LIMIT 1) r"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   }
+  },
+  {
+   "id": 7,
+   "type": "table",
+   "title": "Какие узлы чаще всего пересылают пакеты",
+   "description": "Доля — от всех пакетов, пришедших через ретрансляторы. «Первым в пути» — узел стоял сразу после отправителя. «Шагов до нас»: 0 — прямой сосед observer'а. Строки с «?» — префиксы, за которыми узел не определён или его нет в справочнике.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 4,
     "w": 24,
     "h": 12
    },
@@ -87,7 +441,7 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT coalesce(pn.name, '—') AS \"узел\", h.prefix AS \"префикс\", pn.candidates AS \"кандидатов\", count(DISTINCT h.packet_hash) AS \"пакетов\", round(100.0 * count(DISTINCT h.packet_hash) / nullif((SELECT count(DISTINCT packet_hash) FROM reception WHERE route_type IN (0, 1) AND hop_count > 0 AND $__timeFilter(received_at)), 0), 1) AS \"доля, %\", count(DISTINCT h.packet_hash) FILTER (WHERE h.position = 1) AS \"первым в пути\", round(avg(h.from_end), 1) AS \"шагов до нас\" FROM v_hop h LEFT JOIN v_prefix_node pn ON pn.prefix = h.prefix WHERE $__timeFilter(h.received_at) GROUP BY 1, 2, 3 ORDER BY \"пакетов\" DESC LIMIT 200"
+     "rawSql": "SELECT h.label AS \"узел\", min(h.status) AS \"определение\", string_agg(DISTINCT h.prefix, ' ' ORDER BY h.prefix) AS \"префиксы\", count(DISTINCT h.packet_hash) AS \"пакетов\", round(100.0 * count(DISTINCT h.packet_hash) / nullif((SELECT count(DISTINCT packet_hash) FROM reception WHERE route_type IN (0, 1) AND hop_count > 0 AND $__timeFilter(received_at)), 0), 1) AS \"доля, %\", count(DISTINCT h.packet_hash) FILTER (WHERE h.position = 1) AS \"первым в пути\", round(avg(h.from_end), 1) AS \"шагов до нас\", round(avg(h.probability)::numeric, 2) AS \"вероятность\" FROM v_hop_resolved h WHERE $__timeFilter(h.received_at) GROUP BY 1 ORDER BY \"пакетов\" DESC LIMIT 300"
     }
    ],
    "fieldConfig": {
@@ -104,7 +458,7 @@
    }
   },
   {
-   "id": 2,
+   "id": 8,
    "type": "timeseries",
    "title": "Пакеты через главные ретрансляторы",
    "description": "",
@@ -114,7 +468,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 12,
+    "y": 16,
     "w": 24,
     "h": 8
    },
@@ -127,7 +481,7 @@
      },
      "format": "time_series",
      "rawQuery": true,
-     "rawSql": "SELECT $__timeGroupAlias(h.received_at, $__interval), coalesce(pn.name, h.prefix) AS metric, count(DISTINCT h.packet_hash) AS value FROM v_hop h LEFT JOIN v_prefix_node pn ON pn.prefix = h.prefix WHERE $__timeFilter(h.received_at) AND h.prefix IN ( SELECT prefix FROM v_hop WHERE $__timeFilter(received_at) GROUP BY 1 ORDER BY count(DISTINCT packet_hash) DESC LIMIT 8) GROUP BY 1, 2 ORDER BY 1"
+     "rawSql": "SELECT $__timeGroupAlias(h.received_at, $__interval), h.label AS metric, count(DISTINCT h.packet_hash) AS value FROM v_hop_resolved h WHERE $__timeFilter(h.received_at) AND h.label IN ( SELECT label FROM v_hop_resolved WHERE $__timeFilter(received_at) GROUP BY 1 ORDER BY count(DISTINCT packet_hash) DESC LIMIT 8) GROUP BY 1, 2 ORDER BY 1"
     }
    ],
    "fieldConfig": {
@@ -160,7 +514,7 @@
    }
   },
   {
-   "id": 3,
+   "id": 9,
    "type": "table",
    "title": "Прямые соседи: кого слышит observer",
    "description": "",
@@ -170,7 +524,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 20,
+    "y": 24,
     "w": 14,
     "h": 8
    },
@@ -183,7 +537,7 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT coalesce(pn.name, '—') AS \"узел\", coalesce(r.last_hop, 'сам отправитель') AS \"префикс\", count(*) AS \"приёмов\", count(DISTINCT r.packet_hash) AS \"пакетов\", round(avg(r.rssi)) AS \"RSSI, дБм\", round(avg(r.snr)::numeric, 1) AS \"SNR, дБ\" FROM reception r LEFT JOIN v_prefix_node pn ON pn.prefix = r.last_hop WHERE $__timeFilter(r.received_at) AND r.route_type IN (0, 1) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50"
+     "rawSql": "SELECT h.label AS \"узел\", string_agg(DISTINCT h.prefix, ' ' ORDER BY h.prefix) AS \"префиксы\", count(*) AS \"приёмов\", count(DISTINCT h.packet_hash) AS \"пакетов\", round(avg(h.rssi)) AS \"RSSI, дБм\", round(avg(h.snr)::numeric, 1) AS \"SNR, дБ\" FROM v_hop_resolved h WHERE $__timeFilter(h.received_at) AND h.from_end = 0 GROUP BY 1 ORDER BY 3 DESC LIMIT 50"
     }
    ],
    "fieldConfig": {
@@ -200,7 +554,7 @@
    }
   },
   {
-   "id": 4,
+   "id": 10,
    "type": "barchart",
    "title": "Длина пути",
    "description": "",
@@ -210,7 +564,7 @@
    },
    "gridPos": {
     "x": 14,
-    "y": 20,
+    "y": 24,
     "w": 10,
     "h": 8
    },
@@ -241,7 +595,87 @@
    }
   },
   {
-   "id": 5,
+   "id": 11,
+   "type": "table",
+   "title": "Кто кого слышит",
+   "description": "Соседние узлы в путях: правый узел принял пакет от левого и передал дальше. Основа будущего графа сети.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 12,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT a.label AS \"от узла\", b.label AS \"к узлу\", count(DISTINCT a.packet_hash) AS \"пакетов\" FROM v_hop_resolved a JOIN v_hop_resolved b ON b.reception_id = a.reception_id AND b.position = a.position + 1 WHERE $__timeFilter(a.received_at) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 12,
+   "type": "table",
+   "title": "Самые частые пути",
+   "description": "Слева — ближе к отправителю, справа — наш прямой сосед.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 32,
+    "w": 12,
+    "h": 10
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT string_agg(h.label, ' → ' ORDER BY h.position) AS \"путь\", count(*) AS \"длина\", max(x.packets) AS \"пакетов\" FROM (SELECT path_key, min(id) AS id, count(DISTINCT packet_hash) AS packets FROM reception WHERE $__timeFilter(received_at) AND route_type IN (0, 1) AND hop_count > 0 GROUP BY path_key ORDER BY 3 DESC LIMIT 100) x JOIN v_hop_resolved h ON h.reception_id = x.id GROUP BY x.path_key ORDER BY 3 DESC"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
+  },
+  {
+   "id": 13,
    "type": "piechart",
    "title": "Размер префикса в пути",
    "description": "Чем длиннее префикс, тем увереннее определяется узел.",
@@ -251,7 +685,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 28,
+    "y": 42,
     "w": 8,
     "h": 8
    },
@@ -291,18 +725,18 @@
    }
   },
   {
-   "id": 6,
-   "type": "table",
-   "title": "Самые частые пути",
-   "description": "Слева — ближе к отправителю, справа — наш прямой сосед.",
+   "id": 14,
+   "type": "piechart",
+   "title": "Как определены шаги путей",
+   "description": "",
    "datasource": {
     "type": "grafana-postgresql-datasource",
     "uid": "meshca"
    },
    "gridPos": {
     "x": 8,
-    "y": 28,
-    "w": 16,
+    "y": 42,
+    "w": 8,
     "h": 8
    },
    "targets": [
@@ -314,20 +748,79 @@
      },
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT array_to_string(path, ' → ') AS \"путь\", hop_count AS \"длина\", count(DISTINCT packet_hash) AS \"пакетов\" FROM reception WHERE $__timeFilter(received_at) AND route_type IN (0, 1) AND hop_count > 0 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 100"
+     "rawSql": "SELECT status AS metric, count(*) AS value FROM v_hop_resolved WHERE $__timeFilter(received_at) GROUP BY 1 ORDER BY 2 DESC"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": true
+    },
+    "pieType": "donut",
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "values": [
+      "value",
+      "percent"
+     ]
+    }
+   }
+  },
+  {
+   "id": 15,
+   "type": "timeseries",
+   "title": "Точность определения по расчётам",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 42,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "time_series",
+     "rawQuery": true,
+     "rawSql": "SELECT computed_at AS time, 'точность на проверке' AS metric, 100 * (evaluation->>'accuracy')::numeric AS value FROM resolution_run WHERE $__timeFilter(computed_at) AND evaluation->>'accuracy' IS NOT NULL UNION ALL SELECT computed_at, 'простое правило', 100 * (evaluation->>'baseline_accuracy')::numeric FROM resolution_run WHERE $__timeFilter(computed_at) AND evaluation->>'baseline_accuracy' IS NOT NULL UNION ALL SELECT computed_at, 'доля определённых шагов', 100 * resolved_share FROM resolution_run WHERE $__timeFilter(computed_at) AND resolved_share IS NOT NULL ORDER BY 1"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "unit": "percent",
      "custom": {
-      "filterable": true
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "showPoints": "auto",
+      "spanNulls": false
      }
     },
     "overrides": []
    },
    "options": {
-    "cellHeight": "sm",
-    "showHeader": true
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
    }
   }
  ]

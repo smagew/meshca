@@ -16,6 +16,7 @@ from pathlib import Path
 import psycopg
 
 from . import DECODER_VERSION, monitor, store
+from .analytics import jobs
 from .healthcheck import HEARTBEAT_FILE
 
 log = logging.getLogger("meshca.worker")
@@ -58,6 +59,18 @@ def decode_batch(conn: psycopg.Connection, keys, text_retention: timedelta) -> i
     return len(rows)
 
 
+def analytics_loop(stop: threading.Event, every: timedelta, window_days: int) -> None:
+    """Calculations run beside decoding, on their own connection: a slow or failed run never delays the packets."""
+    stop.wait(120)                                      # let decoding catch up after a start
+    while not stop.is_set():
+        try:
+            with connect() as conn:
+                jobs.resolve_paths(conn, window_days)
+        except Exception:
+            log.exception("analytics run failed")
+        stop.wait(every.total_seconds())
+
+
 def run() -> None:
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -68,6 +81,11 @@ def run() -> None:
     packet_gap = timedelta(minutes=float(os.environ.get("ALERT_PACKET_GAP_MIN", "30")))
     targets = monitor.targets_from_env(os.environ)
     configured = [c for c in os.environ.get("CHANNELS", "").split(",") if c.strip()]
+
+    threading.Thread(
+        target=analytics_loop, name="analytics", daemon=True,
+        args=(stop, timedelta(minutes=float(os.environ.get("RESOLVE_INTERVAL_MIN", "60"))),
+              int(os.environ.get("RESOLVE_WINDOW_DAYS", "30")))).start()
 
     heartbeat = Path(HEARTBEAT_FILE)
     conn: psycopg.Connection | None = None
