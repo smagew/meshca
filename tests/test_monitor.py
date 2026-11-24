@@ -49,7 +49,7 @@ def test_send_posts_json_and_reports_failure():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            self.send_response(204 if self.path == "/ok" else 500)
+            self.send_response(204 if self.path in ("/ok", "/botTOKEN/sendMessage") else 500)
             self.end_headers()
 
         def log_message(self, *args):
@@ -62,6 +62,9 @@ def test_send_posts_json_and_reports_failure():
         assert monitor.send(base + "/ok", "packets", "down", "текст")
         assert received == [{"check": "packets", "state": "down", "title": "meshca", "message": "текст"}]
         assert not monitor.send(base + "/fail", "packets", "ok", "x")
+        assert monitor.send_telegram("TOKEN", "42", "packets", "down", "текст", api=base)
+        assert not monitor.send_telegram("WRONG", "42", "packets", "down", "текст", api=base)
+        assert received[-1]["chat_id"] == "42" and received[-1]["text"].endswith("текст")
     finally:
         server.shutdown()
     assert not monitor.send("http://127.0.0.1:1/none", "packets", "ok", "x")
@@ -74,3 +77,11 @@ def test_packet_silence_is_counted_from_link_recovery():
     late = monitor.evaluate(NOW, NOW - timedelta(minutes=1), NOW - timedelta(hours=3), STATUS_GAP, PACKET_GAP,
                             NOW - timedelta(minutes=31))
     assert late["packets"][0] == "down"
+
+
+def test_targets_from_env():
+    assert monitor.targets_from_env({}) == []
+    assert len(monitor.targets_from_env({"ALERT_WEBHOOK_URL": "http://x/"})) == 1
+    assert monitor.targets_from_env({"ALERT_TELEGRAM_BOT_TOKEN": "t"}) == [], "a token without a chat is not enough"
+    assert len(monitor.targets_from_env({"ALERT_TELEGRAM_BOT_TOKEN": "t", "ALERT_TELEGRAM_CHAT_ID": "1",
+                                         "ALERT_WEBHOOK_URL": "http://x/"})) == 2

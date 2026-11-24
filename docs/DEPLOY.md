@@ -107,8 +107,11 @@ sudo systemctl restart meshcore-packet-capture
 - **Срок хранения текстов** — `MESHCA_TEXT_RETENTION_DAYS` (30). После него текст удаляется из разобранных
   таблиц, а из сырой записи вырезается зашифрованное содержимое; отправитель, время, канал и длина остаются.
 - **Оповещения.** Проверки «связь с observer'ом» и «пакеты» описаны в SPEC, раздел 9. Без настройки они пишут
-  только в журнал `worker` и в таблицу `monitor_event`. Чтобы получать их, задайте `MESHCA_ALERT_WEBHOOK_URL`:
-  туда уйдёт POST с JSON `{"check", "state", "title", "message"}`.
+  только в журнал `worker` и в таблицу `monitor_event`. Получать их можно двумя способами, вместе или порознь:
+  - **Telegram.** Создайте бота у `@BotFather`, напишите боту любое сообщение, запишите токен в
+    `MESHCA_ALERT_TELEGRAM_BOT_TOKEN`. Номер чата — поле `chat.id` в ответе
+    `https://api.telegram.org/bot<токен>/getUpdates`, его в `MESHCA_ALERT_TELEGRAM_CHAT_ID`.
+  - **Произвольный адрес.** `MESHCA_ALERT_WEBHOOK_URL`: туда уйдёт POST с JSON `{"check", "state", "title", "message"}`.
 - **Проверка разбора:** `select count(*) from decode_error` (должно быть 0 или единицы) и
   `select count(*) from reception where hash_ok is false` (должно быть 0).
 

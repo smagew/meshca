@@ -66,7 +66,7 @@ def run() -> None:
     text_retention = timedelta(days=float(os.environ.get("TEXT_RETENTION_DAYS", "30")))
     status_gap = timedelta(minutes=float(os.environ.get("ALERT_STATUS_GAP_MIN", "15")))
     packet_gap = timedelta(minutes=float(os.environ.get("ALERT_PACKET_GAP_MIN", "30")))
-    webhook_url = os.environ.get("ALERT_WEBHOOK_URL", "").strip() or None
+    targets = monitor.targets_from_env(os.environ)
     configured = [c for c in os.environ.get("CHANNELS", "").split(",") if c.strip()]
 
     heartbeat = Path(HEARTBEAT_FILE)
@@ -85,7 +85,7 @@ def run() -> None:
                         log.warning("decoder version is now %d: rebuilding the decoded layer", DECODER_VERSION)
                     keys = store.load_channels(cur, configured, text_retention)
                 log.info("database connected, decoder version %d, %d channel key(s), alerts %s",
-                         DECODER_VERSION, len(keys.names), "to webhook" if webhook_url else "to log only")
+                         DECODER_VERSION, len(keys.names), f"to {len(targets)} target(s)" if targets else "to log only")
 
             count = decode_batch(conn, keys, text_retention)
             decoded_total += count
@@ -95,7 +95,7 @@ def run() -> None:
             if time.monotonic() - last_monitor >= MONITOR_EVERY_S:
                 last_monitor = time.monotonic()
                 try:
-                    monitor.run(conn, status_gap, packet_gap, webhook_url)
+                    monitor.run(conn, status_gap, packet_gap, targets)
                 except psycopg.Error:
                     raise
                 except Exception:                   # alerting must never stop decoding

@@ -4,7 +4,8 @@ observer_link  the observer publishes a status message every five minutes; none 
                connected to our broker (it does not retry a broker that was down when it started).
 packets        status messages arrive but no packet does: the radio side is silent.
 
-A change of state is written to monitor_event and, when ALERT_WEBHOOK_URL is set, sent there as JSON.
+A change of state is written to monitor_event and sent to what is configured: a Telegram chat
+(ALERT_TELEGRAM_BOT_TOKEN, ALERT_TELEGRAM_CHAT_ID) and/or a webhook taking JSON (ALERT_WEBHOOK_URL).
 Messages for the owner are in Russian, like the rest of the interface.
 """
 from __future__ import annotations
@@ -19,6 +20,8 @@ import psycopg
 from . import store
 
 log = logging.getLogger("meshca.monitor")
+
+TELEGRAM_API = "https://api.telegram.org"
 
 
 def _minutes(delta: timedelta) -> int:
@@ -49,18 +52,41 @@ def evaluate(now: datetime, last_status: datetime | None, last_packet: datetime 
     return result
 
 
-def send(url: str, name: str, state: str, message: str) -> bool:
-    body = json.dumps({"check": name, "state": state, "title": "meshca", "message": message}).encode("utf-8")
-    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+def _post(url: str, body: dict, what: str) -> bool:
+    request = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return 200 <= response.status < 300
     except Exception as e:                      # any failure of the receiving side: retried on the next pass
-        log.warning("alert delivery failed: %s", e)
+        # The URL may carry a secret (a Telegram bot token), so only the kind of failure is logged.
+        log.warning("alert delivery to %s failed: %s %s", what, type(e).__name__, getattr(e, "reason", ""))
         return False
 
 
-def run(conn: psycopg.Connection, status_gap: timedelta, packet_gap: timedelta, webhook_url: str | None,
+def send(url: str, name: str, state: str, message: str) -> bool:
+    """Generic webhook: a JSON POST any automation tool can take."""
+    return _post(url, {"check": name, "state": state, "title": "meshca", "message": message}, "webhook")
+
+
+def send_telegram(token: str, chat_id: str, name: str, state: str, message: str, api: str = TELEGRAM_API) -> bool:
+    mark = "\U0001F534" if state == "down" else "\U0001F7E2"
+    return _post(f"{api}/bot{token}/sendMessage", {"chat_id": chat_id, "text": f"{mark} {message}"}, "telegram")
+
+
+def targets_from_env(env) -> list:
+    """Delivery functions (name, state, message) -> bool for everything configured."""
+    targets = []
+    url = env.get("ALERT_WEBHOOK_URL", "").strip()
+    token, chat = env.get("ALERT_TELEGRAM_BOT_TOKEN", "").strip(), env.get("ALERT_TELEGRAM_CHAT_ID", "").strip()
+    if url:
+        targets.append(lambda name, state, message: send(url, name, state, message))
+    if token and chat:
+        targets.append(lambda name, state, message: send_telegram(token, chat, name, state, message))
+    return targets
+
+
+def run(conn: psycopg.Connection, status_gap: timedelta, packet_gap: timedelta, targets: list,
         now: datetime | None = None) -> None:
     now = now or datetime.now(timezone.utc)
     with conn.transaction(), conn.cursor() as cur:
@@ -87,10 +113,11 @@ def run(conn: psycopg.Connection, status_gap: timedelta, packet_gap: timedelta, 
                               "WHERE NOT notified AND at > %s ORDER BY id", (now - timedelta(hours=2),)).fetchall()
 
     # Delivery happens outside the transaction; what fails is retried on the next pass.
-    if not webhook_url:
+    if not targets:
         return
     for event_id, name, state, message in pending:
-        if not send(webhook_url, name, state, message):
+        # An event counts as delivered when at least one target took it.
+        if not any([target(name, state, message) for target in targets]):
             break
         with conn.transaction():
             conn.execute("UPDATE monitor_event SET notified = true WHERE id = %s", (event_id,))
