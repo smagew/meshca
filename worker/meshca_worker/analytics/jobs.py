@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
 import psycopg
 from psycopg.types.json import Jsonb
 
-from . import origin, resolve, topology
+from . import origin, resolve, rhythm, topology
 
 log = logging.getLogger("meshca.analytics")
 
@@ -174,4 +175,41 @@ def build_topology(conn: psycopg.Connection, window_days: int) -> dict:
     summary = {"edges": edges, "senders": len(senders), "judged": sum(s["judged"] for s in senders),
                "critical_nodes": len(critical), "seconds": round(time.monotonic() - started, 2)}
     log.info("topology: %s", summary)
+    return summary
+
+
+RHYTHM_EVERY = timedelta(hours=6)     # rhythms change slowly; the period search is the costliest calculation
+
+
+def build_rhythms(conn: psycopg.Connection, window_days: int, force: bool = False) -> dict:
+    """Stage 6: burstiness, period and weekly profile of every sender known for certain (SPEC 7.5)."""
+    started = time.monotonic()
+    now = datetime.now(timezone.utc)
+    zone = os.environ.get("REPORT_TIMEZONE", "") or "UTC"
+    with conn.transaction(), conn.cursor() as cur:
+        last = cur.execute("SELECT max(computed_at) FROM node_rhythm").fetchone()[0]
+        if not force and last is not None and now - last < RHYTHM_EVERY:
+            return {}
+        rows = cur.execute("""
+            SELECT coalesce(s.pubkey, s.sender) AS subject, s.kind, max(s.sender),
+                   array_agg(extract(epoch FROM p.first_seen)::float8 ORDER BY p.first_seen),
+                   array_agg(extract(isodow FROM p.first_seen AT TIME ZONE %(zone)s)::int ORDER BY p.first_seen),
+                   array_agg(extract(hour FROM p.first_seen AT TIME ZONE %(zone)s)::int ORDER BY p.first_seen)
+            FROM v_sender s JOIN packet p ON p.hash = s.packet_hash
+            WHERE p.first_seen >= %(since)s AND coalesce(s.pubkey, s.sender) IS NOT NULL
+            GROUP BY 1, 2""", {"zone": zone, "since": now - timedelta(days=window_days)}).fetchall()
+        records = []
+        for subject, kind, label, times, weekdays, hours in rows:
+            r = rhythm.analyse(times, list(zip(weekdays, hours)))
+            records.append((subject, kind, label or subject[:8], window_days, r.events, r.median_gap_s, r.burstiness,
+                            r.period_s, r.period_strength, r.period_p, r.period_confirmed, r.night_share, r.profile,
+                            r.judged, rhythm.METHOD_VERSION, now))
+        cur.execute("DELETE FROM node_rhythm")
+        cur.executemany(
+            "INSERT INTO node_rhythm (subject, kind, label, window_days, events, median_gap_s, burstiness, period_s,"
+            " period_strength, period_p, period_confirmed, night_share, profile, judged, method_version, computed_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", records)
+    summary = {"subjects": len(records), "judged": sum(r[13] for r in records),
+               "periodic": sum(r[10] for r in records), "seconds": round(time.monotonic() - started, 2)}
+    log.info("rhythms: %s", summary)
     return summary

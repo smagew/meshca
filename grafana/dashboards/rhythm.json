@@ -440,6 +440,46 @@
     "cellHeight": "sm",
     "showHeader": true
    }
+  },
+  {
+   "id": 6,
+   "type": "table",
+   "title": "Ритм отправителей: период, рваность, ночная активность",
+   "description": "Считается раз в 6 часов за последние 30 дней, только по отправителям, известным точно. Период указан, если он найден на первой половине данных и подтвердился на второй. Рваность: −1 — как часы, 0 — случайно, ближе к 1 — пачками с долгими паузами. Ночь — с 0 до 6 часов. Выводы делаются от 30 пакетов; раньше — «мало данных».",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "meshca"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 38,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "meshca"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT label AS \"отправитель\", kind AS \"что шлёт\", events AS \"пакетов\", round((median_gap_s / 60)::numeric) AS \"медианный интервал, мин\", CASE WHEN period_confirmed THEN round((period_s / 60)::numeric) END AS \"период, мин\", round(period_strength::numeric, 2) AS \"сила периода\", round(burstiness::numeric, 2) AS \"рваность\", round((100 * night_share)::numeric) AS \"ночью, %\", CASE WHEN NOT judged THEN 'мало данных' WHEN period_confirmed THEN 'по расписанию' WHEN burstiness > 0.3 THEN 'всплесками' ELSE 'без явного ритма' END AS \"вывод\" FROM node_rhythm ORDER BY judged DESC, events DESC LIMIT 500"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "filterable": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "cellHeight": "sm",
+    "showHeader": true
+   }
   }
  ]
 }

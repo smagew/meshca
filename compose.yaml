@@ -109,6 +109,7 @@ services:
       ALERT_PACKET_GAP_MIN: ${MESHCA_ALERT_PACKET_GAP_MIN:-30}
       RESOLVE_INTERVAL_MIN: ${MESHCA_RESOLVE_INTERVAL_MIN:-60}
       RESOLVE_WINDOW_DAYS: ${MESHCA_RESOLVE_WINDOW_DAYS:-30}
+      REPORT_TIMEZONE: ${MESHCA_TIMEZONE:-UTC}
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
