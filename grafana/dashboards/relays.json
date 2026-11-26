@@ -64,6 +64,13 @@
    "url": "/d/meshca-topology",
    "keepTime": true,
    "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Изменения",
+   "url": "/d/meshca-changes",
+   "keepTime": true,
+   "icon": "dashboard"
   }
  ],
  "templating": {

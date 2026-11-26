@@ -135,7 +135,7 @@ class Board:
 BOARDS = [("meshca-overview", "meshca · Обзор"), ("meshca-nodes", "meshca · Узлы"),
           ("meshca-relays", "meshca · Ретрансляторы"), ("meshca-channels", "meshca · Каналы"),
           ("meshca-radio", "meshca · Радио"), ("meshca-rhythm", "meshca · Ритм"), ("meshca-map", "meshca · Карта"),
-          ("meshca-topology", "meshca · Топология")]
+          ("meshca-topology", "meshca · Топология"), ("meshca-changes", "meshca · Изменения")]
 
 ONE_POINT = "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer."
 
@@ -545,8 +545,37 @@ def topology() -> Board:
     return b
 
 
+def changes() -> Board:
+    b = Board(*BOARDS[8], "Что меняется в справочнике узлов: новые узлы, смена имени, роли или координат, одно имя "
+              "у разных ключей, сбитые часы. Справочник строится только из объявлений с верной подписью. В первые "
+              "недели сбора почти каждый узел «новый»: мы его просто ещё не слышали.", time_from="now-7d")
+    events = f"FROM v_node_event WHERE {T}(at)"
+    b.stat("Новых узлов", f"SELECT count(*) {events} AND event = 'новый узел'")
+    b.stat("Смен имени, роли, координат", f"SELECT count(*) {events} AND event LIKE 'смена%'")
+    b.stat("Одно имя у разных ключей", f"SELECT count(*) {events} AND event = 'то же имя, другой ключ'")
+    b.stat("Часы сбиты больше чем на 10 минут", "SELECT count(*) FROM v_node_clock WHERE abs(offset_s) > 600",
+           description="По всем узлам за всё время, не только за выбранный период.")
+    b.table("События справочника", f"""
+        SELECT at AS "когда", label AS "узел", event AS "что", old AS "было", new AS "стало", left(pubkey, 10) AS "ключ"
+        {events} ORDER BY (event = 'новый узел'), at DESC LIMIT 500""", h=12,
+        description="Сначала изменения, потом новые узлы. «То же имя, другой ключ»: устройство перепрошили, у владельца "
+                    "второе устройство или кто-то назвался чужим именем — в колонках «было» и «стало» начала ключей.")
+    b.table("Часы узлов", """
+        SELECT label AS "узел", node_role_name(role) AS "роль", adverts AS "объявлений",
+               CASE WHEN abs(offset_s) < 120 THEN 'верно'
+                    WHEN abs(offset_s) < 3600 THEN round((offset_s / 60)::numeric) || ' мин'
+                    WHEN abs(offset_s) < 172800 THEN round((offset_s / 3600)::numeric, 1) || ' ч'
+                    ELSE round((offset_s / 86400)::numeric) || ' дн' END AS "часы узла",
+               last_advert AS "последнее объявление"
+        FROM v_node_clock ORDER BY abs(offset_s) DESC LIMIT 500""", h=12,
+        description="Разница между временем, которое узел пишет в своём объявлении, и временем, когда мы его услышали "
+                    "(медиана по объявлениям узла). Плюс — часы узла спешат, минус — отстают. Сбитые часы не мешают "
+                    "сети, но путают время в сообщениях этого узла.")
+    return b
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for build in (overview, nodes, relays, channels, radio, rhythm, node_map, topology):
+    for build in (overview, nodes, relays, channels, radio, rhythm, node_map, topology, changes):
         build().save()
     print("written:", ", ".join(sorted(p.name for p in OUT.glob("*.json"))))
