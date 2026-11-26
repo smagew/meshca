@@ -71,6 +71,13 @@
    "url": "/d/meshca-changes",
    "keepTime": true,
    "icon": "dashboard"
+  },
+  {
+   "type": "link",
+   "title": "meshca · Общение",
+   "url": "/d/meshca-talk",
+   "keepTime": true,
+   "icon": "dashboard"
   }
  ],
  "templating": {

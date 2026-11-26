@@ -135,7 +135,8 @@ class Board:
 BOARDS = [("meshca-overview", "meshca · Обзор"), ("meshca-nodes", "meshca · Узлы"),
           ("meshca-relays", "meshca · Ретрансляторы"), ("meshca-channels", "meshca · Каналы"),
           ("meshca-radio", "meshca · Радио"), ("meshca-rhythm", "meshca · Ритм"), ("meshca-map", "meshca · Карта"),
-          ("meshca-topology", "meshca · Топология"), ("meshca-changes", "meshca · Изменения")]
+          ("meshca-topology", "meshca · Топология"), ("meshca-changes", "meshca · Изменения"),
+          ("meshca-talk", "meshca · Общение")]
 
 ONE_POINT = "Всё, что здесь показано, видно с одной точки: это пакеты, которые услышал наш observer."
 
@@ -574,8 +575,61 @@ def changes() -> Board:
     return b
 
 
+def talk() -> Board:
+    b = Board(*BOARDS[9], ONE_POINT + " Личные пакеты (запросы, ответы, личные сообщения, пути) несут только по одному "
+              "байту ключа отправителя и получателя, поэтому собеседники — пары этих байтов; рядом показано, какие "
+              "известные узлы под байт подходят. Сессия — пакеты одной пары с паузами меньше 10 минут. Расчёт раз в "
+              "час за последние 30 дней.", time_from="now-7d")
+    sess = f"FROM dm_session WHERE {T}(started_at)"
+    b.stat("Сессий личных пакетов", f"SELECT count(*) {sess}")
+    b.stat("Пар собеседников", f"SELECT count(DISTINCT (a, b)) {sess}")
+    b.stat("Время ответа, медиана", f"SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY median_response_s) {sess}",
+           unit="s", description="Ответ — пакет с другой стороны не позже 30 секунд после пакета первой.")
+    b.stat("Упоминаний в каналах", "SELECT coalesce(sum(mentions), 0) FROM channel_link",
+           description="Обращения вида @[имя] в расшифрованных сообщениях, за 30 дней.")
+    b.stat("Сессий с ответом", f"SELECT round(100.0 * count(*) FILTER (WHERE responses > 0) / nullif(count(*), 0)) {sess}",
+           unit="percent")
+    b.stat("Пакетов в сессии, медиана", f"SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY packets) {sess}")
+    b.table("Кто с кем: пары личных пакетов", f"""
+        SELECT hash_names(a) AS "сторона A", hash_names(b) AS "сторона B", count(*) AS "сессий",
+               sum(packets) AS "пакетов", sum(a_to_b) AS "A → B", sum(b_to_a) AS "B → A",
+               round(percentile_cont(0.5) WITHIN GROUP (ORDER BY median_response_s)::numeric, 1) AS "ответ, с",
+               max(ended_at) AS "последний раз"
+        {sess} GROUP BY a, b ORDER BY 4 DESC LIMIT 300""", h=12,
+        description="Если под байт подходит несколько известных узлов, кто именно из них — не определено. "
+                    "«Неизвестен» — ни одного объявления с таким началом ключа мы не слышали.")
+    b.table("Последние сессии", f"""
+        SELECT started_at AS "начало", round(extract(epoch FROM ended_at - started_at)) AS "длилась, с",
+               hash_names(a) AS "A", hash_names(b) AS "B", packets AS "пакетов",
+               left(array_to_string(kinds, ' → '), 200) AS "ход"
+        {sess} ORDER BY started_at DESC LIMIT 300""", h=10,
+        description="«a:REQ → b:RESPONSE» — A спросил, B ответил. REQ — запрос (вход, статус, телеметрия), "
+                    "RESPONSE — ответ, TXT_MSG — личное сообщение, PATH — сообщённый обратный путь.")
+    b.table("Что за чем следует в сессиях", f"""
+        WITH step AS (
+            SELECT s.id, k.kind, k.n FROM dm_session s, unnest(s.kinds) WITH ORDINALITY AS k(kind, n)
+            WHERE {T}(s.started_at)
+        ), pair AS (
+            SELECT substr(x.kind, 3) AS from_kind, CASE WHEN left(x.kind, 1) = left(y.kind, 1) THEN 'та же сторона'
+                   ELSE 'другая сторона' END AS who, substr(y.kind, 3) AS to_kind
+            FROM step x JOIN step y ON y.id = x.id AND y.n = x.n + 1
+        )
+        SELECT from_kind AS "после", who AS "кто", to_kind AS "идёт", count(*) AS "раз",
+               round(100.0 * count(*) / sum(count(*)) OVER (PARTITION BY from_kind)) AS "% от «после»"
+        FROM pair GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC""", w=12, h=10)
+    b.table("Каналы: кто кому отвечает", """
+        SELECT channel AS "канал", source AS "кто", target AS "кому", mentions AS "упоминаний",
+               quick AS "быстрых ответов", round(expected::numeric, 2) AS "случайно ожидалось",
+               round((quick / nullif(expected, 0))::numeric, 1) AS "во сколько раз чаще случая"
+        FROM channel_link ORDER BY mentions + quick DESC LIMIT 500""", w=12, h=10,
+        description="Упоминание @[имя] — точный признак обращения. Быстрый ответ — сообщение в течение 2 минут после "
+                    "сообщения другого; он бывает и случайным, поэтому рядом — сколько таких совпадений ожидалось бы "
+                    "при случайных временах. Отправитель взят из текста сообщения и протоколом не проверяется.")
+    return b
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for build in (overview, nodes, relays, channels, radio, rhythm, node_map, topology, changes):
+    for build in (overview, nodes, relays, channels, radio, rhythm, node_map, topology, changes, talk):
         build().save()
     print("written:", ", ".join(sorted(p.name for p in OUT.glob("*.json"))))

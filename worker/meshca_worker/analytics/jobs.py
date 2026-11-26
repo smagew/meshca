@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 from psycopg.types.json import Jsonb
 
-from . import origin, resolve, rhythm, topology
+from . import conversation, origin, resolve, rhythm, topology
 
 log = logging.getLogger("meshca.analytics")
 
@@ -212,4 +212,40 @@ def build_rhythms(conn: psycopg.Connection, window_days: int, force: bool = Fals
     summary = {"subjects": len(records), "judged": sum(r[13] for r in records),
                "periodic": sum(r[10] for r in records), "seconds": round(time.monotonic() - started, 2)}
     log.info("rhythms: %s", summary)
+    return summary
+
+
+DIRECT_KINDS = {0: "REQ", 1: "RESPONSE", 2: "TXT_MSG", 8: "PATH"}
+
+
+def build_conversations(conn: psycopg.Connection, window_days: int) -> dict:
+    """Stage 9: sessions of direct packets and reply links in channels (SPEC 7.7)."""
+    started = time.monotonic()
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=window_days)
+    with conn.transaction(), conn.cursor() as cur:
+        direct = [conversation.Direct(at, src, dst, DIRECT_KINDS.get(kind, str(kind))) for at, src, dst, kind in cur.execute(
+            "SELECT extract(epoch FROM p.first_seen)::float8, d.src_hash, d.dst_hash, p.payload_type "
+            "FROM direct_packet d JOIN packet p ON p.hash = d.packet_hash WHERE p.first_seen >= %s", (since,)).fetchall()]
+        messages = [conversation.ChannelMessage(at, channel, sender, text) for at, channel, sender, text in cur.execute(
+            "SELECT extract(epoch FROM p.first_seen)::float8, m.channel, m.sender_name, m.text "
+            "FROM channel_message m JOIN packet p ON p.hash = m.packet_hash "
+            "WHERE m.decrypted AND m.sender_name IS NOT NULL AND p.first_seen >= %s", (since,)).fetchall()]
+        found = conversation.sessions(direct)
+        links = conversation.channel_links(messages)
+        stamp = lambda x: datetime.fromtimestamp(x, timezone.utc)   # noqa: E731
+        cur.execute("DELETE FROM dm_session")
+        cur.executemany(
+            "INSERT INTO dm_session (a, b, started_at, ended_at, packets, a_to_b, b_to_a, kinds, responses,"
+            " median_response_s, computed_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            [(s.a, s.b, stamp(s.start), stamp(s.end), s.packets, s.a_to_b, s.b_to_a, s.kinds, len(s.response_s),
+              s.median_response_s, now) for s in found])
+        cur.execute("DELETE FROM channel_link")
+        cur.executemany(
+            "INSERT INTO channel_link (channel, source, target, mentions, quick, expected, computed_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            [(l.channel, l.source, l.target, l.mentions, l.quick, l.expected, now) for l in links])
+    summary = {"direct_packets": len(direct), "sessions": len(found), "channel_messages": len(messages),
+               "links": len(links), "seconds": round(time.monotonic() - started, 2)}
+    log.info("conversations: %s", summary)
     return summary

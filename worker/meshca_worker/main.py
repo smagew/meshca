@@ -69,6 +69,7 @@ def analytics_loop(stop: threading.Event, every: timedelta, window_days: int) ->
                 jobs.resolve_origins(conn, window_days)
                 jobs.build_topology(conn, window_days)
                 jobs.build_rhythms(conn, window_days)
+                jobs.build_conversations(conn, window_days)
         except Exception:
             log.exception("analytics run failed")
         stop.wait(every.total_seconds())
