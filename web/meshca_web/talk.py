@@ -32,6 +32,7 @@ class DirectPacket:
     kind: int                   # payload type
     src_key: str | None         # named sender (path fingerprint, probability >= 0.7)
     first_hop: str | None       # public key of the first repeater, when known
+    hash: str | None = None     # packet hash
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class ChannelMessage:
     sender: str
     text: str
     first_hop: str | None
+    hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -63,7 +65,7 @@ class Link:
     last: float = 0.0
     channels: set[str] = field(default_factory=set)
     uncertain: bool = False
-    items: list[tuple] = field(default_factory=list)    # (time, packet type or "channel", from a to b, channel)
+    items: list[tuple] = field(default_factory=list)    # (time, packet type, from a to b, channel, packet hash)
 
 
 def _has_coords(n: Node | None) -> bool:
@@ -128,7 +130,7 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
         l.a_to_b += forward
         l.b_to_a += not forward
         l.last = max(l.last, p.at)
-        l.items.append((p.at, p.kind, forward, None))
+        l.items.append((p.at, p.kind, forward, None, p.hash))
         l.uncertain = l.uncertain or not (src_ok and dst_ok)
         if p.first_hop:
             homes[src][p.first_hop] += 1
@@ -149,19 +151,19 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
         quick: Counter = Counter()
         count: Counter = Counter(m.sender for m in items)
         last: dict[tuple[str, str], float] = {}
-        said: dict[tuple[str, str], list[float]] = defaultdict(list)       # times of mentions
-        replied: dict[tuple[str, str], list[float]] = defaultdict(list)    # times of quick replies
+        said: dict[tuple[str, str], list[ChannelMessage]] = defaultdict(list)       # mentions
+        replied: dict[tuple[str, str], list[ChannelMessage]] = defaultdict(list)    # quick replies
         for m in items:
             for name in set(x.strip() for x in MENTION.findall(m.text or "")):
                 if name and name != m.sender:
                     mentions[m.sender, name] += 1
                     last[m.sender, name] = m.at
-                    said[m.sender, name].append(m.at)
+                    said[m.sender, name].append(m)
         for prev, m in zip(items, items[1:]):
             if m.sender != prev.sender and m.at - prev.at <= QUICK_S:
                 quick[m.sender, prev.sender] += 1
                 last[m.sender, prev.sender] = m.at
-                replied[m.sender, prev.sender].append(m.at)
+                replied[m.sender, prev.sender].append(m)
         span = items[-1].at - items[0].at if len(items) > 1 else 0.0
         for pair in set(mentions) | set(quick):
             source, target = pair
@@ -179,8 +181,8 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
             l.b_to_a += 0 if forward else n
             l.channels.add(channel)
             l.last = max(l.last, last[pair])
-            times = set(said[pair]) | (set(replied[pair]) if significant_quick else set())
-            l.items.extend((t, "channel", forward, channel) for t in sorted(times))
+            seen = {m.at: m for m in said[pair] + (replied[pair] if significant_quick else [])}
+            l.items.extend((m.at, 5, forward, channel, m.hash) for _, m in sorted(seen.items()))
 
     # --- places ---
     ids = sorted({l.a for l in links.values()} | {l.b for l in links.values()})

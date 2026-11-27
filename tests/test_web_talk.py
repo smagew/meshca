@@ -60,7 +60,7 @@ def test_channel_mentions_and_quick_replies_against_chance():
     assert {link["a"], link["b"]} == {PHONE_A, "@Carl"}
     assert link["channel"] == 4 and link["channels"] == ["#t"]
     # Each exchange is kept: the mention at 20 s is also a quick reply, so 3 distinct moments.
-    assert sorted(i[0] for i in link["items"]) == [20, 5030, 9040] and all(i[1] == "channel" for i in link["items"])
+    assert sorted(i[0] for i in link["items"]) == [20, 5030, 9040] and all(i[1] == 5 for i in link["items"])
     carl = {n["id"]: n for n in out["nodes"]}["@Carl"]
     assert carl["kind"] == "person" and carl["placed"] == "home"
 

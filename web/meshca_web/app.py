@@ -54,11 +54,11 @@ def load_talk(conn: psycopg.Connection, days: int) -> dict:
     direct = [talk.DirectPacket(*row) for row in conn.execute(
         "SELECT extract(epoch FROM p.first_seen)::float8, d.src_hash, d.dst_hash, p.payload_type, "
         "(SELECT o.pubkey FROM origin_resolution o WHERE o.packet_hash = p.hash AND o.rank = 1 "
-        " AND o.probability >= 0.7), " + FIRST_HOP + " "
+        " AND o.probability >= 0.7), " + FIRST_HOP + ", p.hash "
         "FROM direct_packet d JOIN packet p ON p.hash = d.packet_hash "
         "WHERE p.first_seen > now() - make_interval(days => %(days)s)", window).fetchall()]
     messages = [talk.ChannelMessage(*row) for row in conn.execute(
-        "SELECT extract(epoch FROM p.first_seen)::float8, m.channel, m.sender_name, coalesce(m.text, ''), " + FIRST_HOP + " "
+        "SELECT extract(epoch FROM p.first_seen)::float8, m.channel, m.sender_name, coalesce(m.text, ''), " + FIRST_HOP + ", p.hash "
         "FROM channel_message m JOIN packet p ON p.hash = m.packet_hash "
         "WHERE m.decrypted AND m.sender_name IS NOT NULL AND m.channel IS NOT NULL "
         "AND p.first_seen > now() - make_interval(days => %(days)s)", window).fetchall()]
@@ -100,8 +100,8 @@ def load_link(conn: psycopg.Connection, source: str, target: str, days: int) -> 
                         CASE WHEN q.dst_hash IS NOT NULL THEN hash_names(q.dst_hash) END,
                         m.channel) AS addressee,
                (SELECT array_agg(h.label ORDER BY h.position) FROM v_hop_resolved h WHERE h.reception_id = pkt.reception_id) AS path,
-               p.reception_count
-        FROM pkt JOIN packet p ON p.hash = pkt.packet_hash
+               p.reception_count, p.hash, route_type_name(r.route_type), r.hop_count, r.packet_len, r.snr, r.rssi
+        FROM pkt JOIN packet p ON p.hash = pkt.packet_hash JOIN reception r ON r.id = pkt.reception_id
         LEFT JOIN LATERAL (SELECT sender FROM v_sender v WHERE v.packet_hash = p.hash LIMIT 1) s ON true
         LEFT JOIN direct_packet d ON d.packet_hash = p.hash
         LEFT JOIN anon_request q ON q.packet_hash = p.hash
@@ -110,7 +110,8 @@ def load_link(conn: psycopg.Connection, source: str, target: str, days: int) -> 
     return {
         "source": source, "target": target, "days": days,
         "kinds": [{"type": t, "packets": n} for t, n in kinds],
-        "packets": [dict(zip(("at", "type", "sender", "addressee", "path", "receptions"), r)) for r in rows],
+        "packets": [dict(zip(("at", "type", "sender", "addressee", "path", "receptions", "hash", "route", "hops", "bytes",
+                                "snr", "rssi"), r)) for r in rows],
     }
 
 

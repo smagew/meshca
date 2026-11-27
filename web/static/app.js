@@ -295,10 +295,10 @@ const ROLE_TEXT = {
   "датчик": "Датчик: узел, который сам по себе передаёт показания.",
 };
 const KIND_TEXT = {
-  adverts: "узел сообщает всем о себе",
-  channel: "сообщения в общих чатах",
-  direct: "переписка людей",
-  service: "приложение опрашивает узел, команды",
+  adverts: "узел сообщает всем о себе · ADVERT",
+  channel: "сообщения в общих чатах · GRP_TXT, GRP_DATA",
+  direct: "переписка людей · TXT_MSG, ACK",
+  service: "приложение опрашивает узел, команды · REQ, RESPONSE, ANON_REQ, PATH",
 };
 const plural = (n, one, few, many) => {
   const a = Math.abs(n) % 100, b = a % 10;
@@ -377,10 +377,10 @@ const HELP = {
   "mode-path": `<div class="t">Как пакеты доходят до нас</div><p>Дорога пакетов по сети к нашему observer'у: кто от кого их услышал и передал дальше.</p><p>Отвечает на вопросы: кто больше всех носит пакеты, какие связи главные, на ком держится связь с дальними частями сети.</p>`,
   "mode-talk": `<div class="t">Кто с кем общается</div><p>Линия соединяет того, кто отправил, и того, кому было адресовано, — каким бы путём ни шли пакеты.</p><p>Видно: кто с кем переписывается, кто чей ретранслятор опрашивает, кто кому отвечает в каналах.</p>`,
   days: `<div class="t">Период</div><p>За сколько последних дней собраны данные на карте. Расчёт обновляется раз в час.</p>`,
-  adverts: `<div class="t" style="color:${COLOURS.adverts}">Объявления</div><p>Узел время от времени сообщает всей сети о себе: «я есть», своё имя, роль и координаты. Так приложения узнают о соседях.</p><p>Это самый частый вид фона в сети.</p>`,
-  channel: `<div class="t" style="color:${COLOURS.channel}">Каналы</div><p>Сообщения в общих чатах: Public, #test и другие. Их получают все, кто подписан на канал.</p><p>В режиме «Кто с кем» — ответы людей друг другу в этих чатах.</p>`,
-  direct: `<div class="t" style="color:${COLOURS.direct}">Личные сообщения</div><p>Переписка от человека к человеку и подтверждения, что сообщение доставлено.</p><p>Сами тексты зашифрованы и нам не видны — только факт обмена.</p>`,
-  service: `<div class="t" style="color:${COLOURS.service}">Служебные</div><p>Пакеты, которые шлют приложения, а не люди:</p><ul><li>вход на ретранслятор или в комнату, в том числе анонимный;</li><li>запросы состояния и телеметрии и ответы на них;</li><li>команды удалённого управления ретранслятором;</li><li>сообщённый обратный путь: узел говорит отправителю, каким путём ему отвечать.</li></ul>`,
+  adverts: `<div class="t" style="color:${COLOURS.adverts}">Объявления <code class="proto">ADVERT · 4</code></div><p>Узел время от времени сообщает всей сети о себе: «я есть», своё имя, роль и координаты. Так приложения узнают о соседях.</p><p>Это самый частый вид фона в сети.</p>`,
+  channel: `<div class="t" style="color:${COLOURS.channel}">Каналы <code class="proto">GRP_TXT · 5</code> <code class="proto">GRP_DATA · 6</code></div><p>Сообщения в общих чатах: Public, #test и другие. Их получают все, кто подписан на канал.</p><p>В режиме «Кто с кем» — ответы людей друг другу в этих чатах.</p>`,
+  direct: `<div class="t" style="color:${COLOURS.direct}">Личные сообщения <code class="proto">TXT_MSG · 2</code> <code class="proto">ACK · 3</code></div><p>Переписка от человека к человеку и подтверждения, что сообщение доставлено.</p><p>Сами тексты зашифрованы и нам не видны — только факт обмена.</p>`,
+  service: `<div class="t" style="color:${COLOURS.service}">Служебные</div><p>Пакеты, которые шлют приложения, а не люди:</p><ul><li><code class="proto">REQ · 0</code> запрос к узлу: вход, состояние, телеметрия, соседи;</li><li><code class="proto">RESPONSE · 1</code> ответ узла на запрос;</li><li><code class="proto">ANON_REQ · 7</code> анонимный запрос: вход незнакомого устройства;</li><li><code class="proto">PATH · 8</code> сообщённый обратный путь: узел говорит отправителю, каким путём ему отвечать.</li></ul><p>В режиме «Кто с кем» сюда же попадают <code class="proto">TXT_MSG · 2</code> ретранслятору — это команды его удалённой консоли.</p>`,
   min: `<div class="t">Порог</div><p>Связи, по которым прошло меньше указанного числа, скрыты, чтобы карта не превращалась в паутину. Сдвиньте влево — увидите всё, вправо — только главные связи.</p>`,
   risks: `<div class="t" style="color:${CRIT}">Только узлы, без которых кто-то пропадёт</div><p>Оставляет на карте только критичные узлы и их связи.</p><p>Критичный узел — тот, через который до нас идут <b>все</b> пакеты какого-то отправителя. Если он выключится, этот отправитель перестанет до нас доходить.</p><p>Так видно, на ком держится связь с дальними частями сети и где не хватает обходных путей.</p>`,
   stats: `<div class="t">Что сейчас на карте</div><p>Сколько узлов и связей показано с учётом фильтров и сколько всего есть за период.</p><p>«Не на карте» — узлы, место которых неизвестно: нет ни своих координат, ни соседей с координатами.</p>`,
@@ -427,14 +427,29 @@ const TYPE_INFO = {
   11: ["service", "управляющий пакет", "служебный обмен узлов, например поиск соседей"],
   15: ["service", "особый пакет", "пакет нестандартного формата"],
 };
-const typeInfo = (t) => (t === "channel" ? ["channel", "ответ в канале", "обращение @[имя] или ответ сразу после сообщения другого"] : TYPE_INFO[t] || ["service", `тип ${t}`, ""]);
+// Protocol names of the payload types, as MeshCore calls them.
+const PROTO = { 0: "REQ", 1: "RESPONSE", 2: "TXT_MSG", 3: "ACK", 4: "ADVERT", 5: "GRP_TXT", 6: "GRP_DATA", 7: "ANON_REQ",
+  8: "PATH", 9: "TRACE", 10: "MULTIPART", 11: "CONTROL", 15: "RAW_CUSTOM" };
+const typeInfo = (t) => TYPE_INFO[t] || ["service", `тип ${t}`, ""];
+const proto = (t) => `<code class="proto" title="Тип пакета в протоколе MeshCore: название и код">${PROTO[t] || "TYPE"} · ${t}</code>`;
+const ROUTE_TEXT = { FLOOD: "рассылка по всей сети", TRANSPORT_FLOOD: "рассылка по сети с кодом региона", DIRECT: "по заранее известному пути", TRANSPORT_DIRECT: "по известному пути с кодом региона" };
+function packetLine(p) {
+  const bits = [`<span title="Хэш пакета: одинаков у всех копий одного пакета">#${esc(p.hash)}</span>`];
+  if (p.route) bits.push(`<span title="${ROUTE_TEXT[p.route] || ""}">${esc(p.route)}</span>`);
+  if (p.hops != null) bits.push(`<span title="Сколько ретрансляторов пакет прошёл до нас">${p.hops} ${plural(p.hops, "переход", "перехода", "переходов")}</span>`);
+  if (p.bytes) bits.push(`<span title="Размер пакета в эфире">${p.bytes} байт</span>`);
+  if (p.snr != null) bits.push(`<span title="Отношение сигнал/шум при приёме: чем больше, тем чище">SNR ${p.snr} дБ</span>`);
+  if (p.rssi != null) bits.push(`<span title="Уровень сигнала при приёме: ближе к нулю — сильнее">RSSI ${p.rssi} дБм</span>`);
+  if (p.receptions > 1) bits.push(`<span title="Сколько раз observer услышал этот пакет разными путями">принят ${p.receptions} раз</span>`);
+  return `<div class="pkt">${bits.join(" · ")}</div>`;
+}
 
 function kindsTable(counts, info = typeInfo) {
   const total = counts.reduce((s, c) => s + c.n, 0) || 1;
   return `<table class="kinds-table">${counts.map((c) => {
     const [kind, name, text] = info(c.type);
     return `<tr class="ktype" data-type="${c.type}"><td><i class="dot" style="background:${COLOURS[kind]}"></i></td>` +
-      `<td><b>${name}</b><div class="meta">${text}</div></td><td class="n">${fmt(c.n)}<div class="meta">${Math.round((100 * c.n) / total)}%</div></td></tr>`;
+      `<td><b>${name}</b> ${proto(c.type)}<div class="meta">${text}</div></td><td class="n">${fmt(c.n)}<div class="meta">${Math.round((100 * c.n) / total)}%</div></td></tr>`;
   }).join("")}</table>`;
 }
 
@@ -458,9 +473,9 @@ async function openLink(e) {
     const repeater = [s, t].some((n) => n.role === "ретранслятор");
     const info = (type) => (repeater && +type === 2
       ? ["service", "команда ретранслятору", "текстовая команда его удалённой консоли (настройки, статус, перезапуск); текст зашифрован"]
-      : typeInfo(type));
+      : +type === 5 ? ["channel", "ответ в канале", "обращение @[имя] или ответ сразу после сообщения другого"] : typeInfo(type));
     const counts = Object.entries(e.items.reduce((m, i) => ((m[i[1]] = (m[i[1]] || 0) + 1), m), {}))
-      .map(([type, n]) => ({ type: isNaN(+type) ? type : +type, n })).sort((a, b) => b.n - a.n);
+      .map(([type, n]) => ({ type: +type, n })).sort((a, b) => b.n - a.n);
     body.innerHTML = `<h2>${node(s)} ↔ ${node(t)}</h2>
       <div class="meta">Что эти двое отправляли друг другу ${periodText()}. Нажмите на строку — останутся только такие пакеты.</div>
       <h3>Из чего состоит</h3>${kindsTable(counts, info)}
@@ -469,7 +484,7 @@ async function openLink(e) {
       const items = e.items.filter((i) => type == null || String(i[1]) === String(type)).slice(0, 80);
       document.getElementById("linkList").innerHTML = `<table>${items.map((i) => {
         const [from, to] = i[2] ? [s, t] : [t, s];
-        return `<tr><td class="when">${when(i[0])}</td><td>${esc(from.label)} → ${esc(to.label)}<div class="meta">${info(i[1])[1]}${i[3] ? " · " + esc(i[3]) : ""}</div></td></tr>`;
+        return `<tr><td class="when">${when(i[0])}</td><td>${esc(from.label)} → ${esc(to.label)}<div class="meta">${info(i[1])[1]} ${proto(i[1])}${i[3] ? " · " + esc(i[3]) : ""}</div>${i[4] ? `<div class="pkt">#${esc(i[4])}</div>` : ""}</td></tr>`;
       }).join("")}</table>` + (e.items.length >= 150 ? `<div class="meta">показаны последние 150</div>` : "");
     };
     render(null); filterable(render); bindNodes();
@@ -496,7 +511,7 @@ async function openLink(e) {
       const to = p.addressee ? ` → ${p.type === 5 || p.type === 6 ? "в канал " : ""}<b>${esc(p.addressee)}</b>` : p.type === 4 ? " → всем" : "";
       const path = p.path && p.path.length ? `<div class="meta path">путь: ${p.path.map(esc).join(" → ")} → наш observer</div>` : "";
       return `<tr><td class="when">${new Date(p.at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td>` +
-        `<td>${name}<div class="meta">${who}${to}</div>${path}</td></tr>`;
+        `<td>${name} ${proto(p.type)}<div class="meta">${who}${to}</div>${path}${packetLine(p)}</td></tr>`;
     }).join("")}</table>` + (data.packets.length >= 150 ? `<div class="meta">показаны последние 150</div>` : "") : `<div class="meta">Нет пакетов</div>`;
   };
   render(null); filterable(render); bindNodes();
