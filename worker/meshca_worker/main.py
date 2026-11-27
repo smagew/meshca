@@ -22,7 +22,7 @@ from .healthcheck import HEARTBEAT_FILE
 log = logging.getLogger("meshca.worker")
 
 BATCH = 500
-IDLE_WAIT_S = 5.0
+IDLE_WAIT_S = 1.0          # new packets appear on the live map within about a second
 MONITOR_EVERY_S = 60.0
 RETENTION_EVERY_S = 3600.0
 DB_RETRY_MAX_S = 30.0

@@ -26,6 +26,22 @@ const MODES = {
       <li><b>Пунктир</b> — узел не определён (известно только начало ключа) или его место примерное.</li>
     </ul>`,
   },
+  live: {
+    text: "Что происходит в эфире прямо сейчас: каждый новый пакет, который услышал наш observer, пролетает по своему " +
+          "пути — от первого ретранслятора к нам. Пакет появляется через несколько секунд после того, как прозвучал в эфире.",
+    unit: "пакетов",
+    legend: `<ul>
+      <li><b>Светящаяся точка</b> — пакет. Она пролетает по ретрансляторам, которые его передавали, и приходит к нашему
+        observer'у. Цвет — вид пакета: <b style="color:var(--adverts)">объявление</b>, <b style="color:var(--channel)">канал</b>,
+        <b style="color:var(--direct)">личное сообщение</b>, <b style="color:var(--service)">служебный</b>.</li>
+      <li><b>Вспышка у узла</b> — отсюда пакет начал путь, насколько нам видно.</li>
+      <li><b>Вспышка у observer'а</b> — пакет пришёл к нам напрямую, без известного пути (адресный пакет по готовому маршруту
+        или узел рядом).</li>
+      <li>Мы видим только то, что дошло до нашей точки, и путь — от первого ретранслятора: отправителя пакет не называет,
+        он известен лишь для объявлений, анонимных запросов и сообщений каналов.</li>
+      <li>Нажмите на пакет в ленте слева — он пролетит ещё раз, а справа откроются подробности.</li>
+    </ul>`,
+  },
   talk: {
     text: "Кто кому пишет и кого опрашивает. Линия соединяет отправителя и получателя, каким бы путём ни шли пакеты. " +
           "Видны только разговоры, пакеты которых дошли до нашего observer'а.",
@@ -212,8 +228,9 @@ function applyFilters() {
     const crit = new Set(d.nodes.filter((n) => n.critical.length).map((n) => n.id));
     edges = edges.filter((e) => crit.has(e.source) || crit.has(e.target));
   }
-  state.visibleEdges = edges;
-  state.visibleNodes = new Set(edges.flatMap((e) => [e.source, e.target]));
+  state.visibleEdges = state.mode === "live" ? [] : edges;
+  state.visibleNodes = state.mode === "live" ? new Set(d.nodes.filter((n) => n.lat != null).map((n) => n.id))
+    : new Set(edges.flatMap((e) => [e.source, e.target]));
   if (state.mode === "path" && state.risks) d.nodes.forEach((n) => n.critical.length && state.visibleNodes.add(n.id));
   for (const [id, marker] of state.markers) {
     const on = state.visibleNodes.has(id);
@@ -324,7 +341,7 @@ function whoIs(n) {
 function nodeTip(n) {
   let h = `<div class="t">${esc(n.label)}</div><div class="k">${esc(n.role || { observer: "наш observer", unknown: "не определён", person: "известен по имени" }[n.kind] || "")}</div>`;
   h += `<p>${whoIs(n)}</p>`;
-  if (state.mode === "path") {
+  if (state.mode !== "talk") {
     if (n.kind === "observer") {
       h += `<div class="num">Принял <b>${packetsWord(n.heard)}</b> ${periodText()}</div>`;
     } else {
@@ -355,7 +372,7 @@ function neighboursOfAll(id) {
 
 function edgeTip(e) {
   const s = state.nodes.get(e.source), t = state.nodes.get(e.target);
-  if (state.mode === "path") {
+  if (state.mode !== "talk") {
     let h = `<div class="t">${esc(s.label)} → ${esc(t.label)}</div><div class="k">участок пути пакетов к нашему observer'у</div>`;
     h += `<div class="num"><b>${esc(t.label)}</b> услышал от <b>${esc(s.label)}</b> и передал дальше <b>${packetsWord(e.packets)}</b> ${periodText()}</div>`;
     h += mixTable(e.mix);
@@ -383,6 +400,8 @@ const HELP = {
   service: `<div class="t" style="color:${COLOURS.service}">Служебные</div><p>Пакеты, которые шлют приложения, а не люди:</p><ul><li><code class="proto">REQ · 0</code> запрос к узлу: вход, состояние, телеметрия, соседи;</li><li><code class="proto">RESPONSE · 1</code> ответ узла на запрос;</li><li><code class="proto">ANON_REQ · 7</code> анонимный запрос: вход незнакомого устройства;</li><li><code class="proto">PATH · 8</code> сообщённый обратный путь: узел говорит отправителю, каким путём ему отвечать.</li></ul><p>В режиме «Кто с кем» сюда же попадают <code class="proto">TXT_MSG · 2</code> ретранслятору — это команды его удалённой консоли.</p>`,
   min: `<div class="t">Порог</div><p>Связи, по которым прошло меньше указанного числа, скрыты, чтобы карта не превращалась в паутину. Сдвиньте влево — увидите всё, вправо — только главные связи.</p>`,
   risks: `<div class="t" style="color:${CRIT}">Только узлы, без которых кто-то пропадёт</div><p>Оставляет на карте только критичные узлы и их связи.</p><p>Критичный узел — тот, через который до нас идут <b>все</b> пакеты какого-то отправителя. Если он выключится, этот отправитель перестанет до нас доходить.</p><p>Так видно, на ком держится связь с дальними частями сети и где не хватает обходных путей.</p>`,
+  "mode-live": `<div class="t">Сейчас в эфире</div><p>Живой показ: каждый новый пакет, который услышал наш observer, пролетает по карте своим путём.</p><p>Задержка — несколько секунд: пакет должен дойти до нас, записаться и разобраться.</p>`,
+  perMin: `<div class="t">Пакетов за минуту</div><p>Сколько пакетов observer принял за последние 60 секунд. Одна передача может быть услышана несколько раз разными путями — каждый приём считается.</p>`,
   stats: `<div class="t">Что сейчас на карте</div><p>Сколько узлов и связей показано с учётом фильтров и сколько всего есть за период.</p><p>«Не на карте» — узлы, место которых неизвестно: нет ни своих координат, ни соседей с координатами.</p>`,
 };
 let helpEl = null;
@@ -533,7 +552,7 @@ async function select(id) {
   }).join("") + (list.length > 12 ? `<tr><td colspan="2" class="meta">и ещё ${list.length - 12}</td></tr>` : "");
   const edges = state.data.edges;
   let html = `<h2>${esc(n.label)}</h2><div class="meta">${esc(n.role || { unknown: "не определён: известно только начало ключа", observer: "наш observer", person: "известен только по имени в сообщениях" }[n.kind] || "")}</div>`;
-  if (state.mode === "path") {
+  if (state.mode !== "talk") {
     const incoming = edges.filter((e) => e.target === id).sort((a, b) => b.packets - a.packets);
     const outgoing = edges.filter((e) => e.source === id).sort((a, b) => b.packets - a.packets);
     html += `<div>${n.kind === "observer" ? `Принял <b>${fmt(n.heard)}</b> пакетов` : `Услышал и передал дальше <b>${fmt(n.relayed)}</b> пакетов`}</div>
@@ -588,11 +607,12 @@ async function load(fit) {
   const days = document.getElementById("days").value, status = document.getElementById("status"), mode = state.mode;
   status.textContent = "Загрузка…";
   try {
-    const res = await fetch(`api/${mode === "path" ? "graph" : "talk"}?days=${days}`);
+    const res = await fetch(`api/${mode === "talk" ? "talk" : "graph"}?days=${mode === "live" ? 7 : days}`);
     if (!res.ok) throw new Error((await res.json()).error || res.status);
     const raw = await res.json();
     if (mode !== state.mode) return;
-    state.data = mode === "path" ? fromPath(raw) : fromTalk(raw);
+    state.data = mode === "talk" ? fromTalk(raw) : fromPath(raw);
+    document.getElementById("map").classList.toggle("live-base", mode === "live");
     state.nodes = new Map(state.data.nodes.map((n) => [n.id, n]));
     for (const m of state.markers.values()) m.remove();
     state.markers = new Map();
@@ -625,27 +645,177 @@ function viewFromHash() {
 }
 function saveView() {
   const c = map.getCenter();
-  history.replaceState(null, "", `#${map.getZoom()}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}${state.mode === "talk" ? "/talk" : ""}`);
+  history.replaceState(null, "", `#${map.getZoom()}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}${state.mode === "path" ? "" : "/" + state.mode}`);
 }
 map.on("moveend", saveView);
+
+
+// ---------- live mode: packets fly along their path as they arrive ----------
+const typeKind = (t) => (t === 4 ? "adverts" : t === 5 || t === 6 ? "channel" : t === 2 || t === 3 ? "direct" : "service");
+
+const AnimLayer = L.Layer.extend({
+  onAdd(m) {
+    this._canvas = L.DomUtil.create("canvas", "anim-canvas");
+    Object.assign(this._canvas.style, { position: "absolute", pointerEvents: "none" });
+    m.getPanes().markerPane.parentNode.insertBefore(this._canvas, m.getPanes().markerPane.nextSibling);
+    this._canvas.style.zIndex = 650;
+    this.items = [];
+    m.on("move zoom resize viewreset", () => this.kick());
+    this.kick();
+  },
+  add(item) { this.items.push(item); this.kick(); },
+  clear() { this.items = []; this.kick(); },
+  kick() { if (!this._raf) this._raf = requestAnimationFrame(() => this.frame()); },
+  frame() {
+    this._raf = null;
+    const m = this._map, c = this._canvas, size = m.getSize(), ratio = window.devicePixelRatio || 1, now = performance.now();
+    L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
+    if (c.width !== size.x * ratio || c.height !== size.y * ratio) {
+      c.width = size.x * ratio; c.height = size.y * ratio; c.style.width = size.x + "px"; c.style.height = size.y + "px";
+    }
+    const ctx = c.getContext("2d"); ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, size.x, size.y);
+    this.items = this.items.filter((it) => now < it.t0 + it.duration + 1600);
+    for (const it of this.items) {
+      if (now < it.t0) continue;
+      const pts = it.points.map((p) => m.latLngToContainerPoint(p));
+      const colour = COLOURS[it.kind], t = Math.min(1, (now - it.t0) / it.duration), fade = now > it.t0 + it.duration ? 1 - (now - it.t0 - it.duration) / 1600 : 1;
+      if (pts.length === 1) {   // nothing to fly along: a pulse where it is
+        const k = Math.min(1, (now - it.t0) / 900);
+        ctx.globalAlpha = Math.max(0, 1 - k) * fade; ctx.strokeStyle = colour; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 8 + 26 * k, 0, 2 * Math.PI); ctx.stroke();
+        continue;
+      }
+      // where the head is now
+      const seg = (pts.length - 1) * t, i = Math.min(pts.length - 2, Math.floor(seg)), f = seg - i;
+      const head = { x: pts[i].x + (pts[i + 1].x - pts[i].x) * f, y: pts[i].y + (pts[i + 1].y - pts[i].y) * f };
+      // the trail already passed
+      ctx.globalAlpha = 0.55 * fade; ctx.strokeStyle = colour; ctx.lineWidth = it.selected ? 4 : 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      for (let j = 1; j <= i; j++) ctx.lineTo(pts[j].x, pts[j].y);
+      ctx.lineTo(head.x, head.y); ctx.stroke();
+      // a flash where it started, and where it arrived
+      const start = Math.min(1, (now - it.t0) / 700);
+      ctx.globalAlpha = (1 - start) * 0.9; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 6 + 18 * start, 0, 2 * Math.PI); ctx.stroke();
+      if (t >= 1) {
+        const k = Math.min(1, (now - it.t0 - it.duration) / 800);
+        ctx.globalAlpha = (1 - k) * 0.9; ctx.beginPath(); ctx.arc(head.x, head.y, 6 + 20 * k, 0, 2 * Math.PI); ctx.stroke();
+      } else {
+        const g = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, 13);
+        g.addColorStop(0, "#ffffff"); g.addColorStop(0.25, colour); g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(head.x, head.y, 13, 0, 2 * Math.PI); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (this.items.length) this.kick();
+  },
+});
+const anim = new AnimLayer().addTo(map);
+
+const live = {
+  cursor: 0, timer: null, paused: false, seen: [], feed: [],
+  start() {
+    if (this.timer) return;
+    this.cursor = 0; this.feed = []; document.getElementById("feed").innerHTML = "";
+    this.poll(true);
+    this.timer = setInterval(() => this.poll(false), 2000);
+  },
+  stop() { clearInterval(this.timer); this.timer = null; anim.clear(); },
+  async poll(first) {
+    if (this.paused && !first) return;
+    try {
+      const res = await fetch(`api/live?after=${this.cursor}`);
+      const d = await res.json();
+      if (state.mode !== "live") return;
+      this.cursor = d.cursor;
+      const now = Date.now();
+      d.packets.forEach((p, i) => {
+        this.seen.push(Date.parse(p.at));   // by the time the observer heard it, so the first batch is not "this minute"
+        this.addToFeed(p);
+        if (!first) this.fly(p, i * Math.min(300, 1800 / Math.max(1, d.packets.length)));
+      });
+      this.seen = this.seen.filter((t) => now - t < 60000);
+      document.getElementById("perMin").textContent = fmt(this.seen.length);
+      document.getElementById("liveState").textContent = `обновлено ${new Date().toLocaleTimeString("ru-RU")}`;
+    } catch {
+      document.getElementById("liveState").textContent = "нет связи с сервером, повторяю…";
+    }
+  },
+  points(p) {
+    const where = (id) => {
+      const n = state.nodes.get(id);
+      if (n && n.lat != null) return [n.lat, n.lon];
+      return p.coords[id] || null;
+    };
+    const pts = [];
+    if (p.sender_key && p.nodes.length && where(p.sender_key)) pts.push(where(p.sender_key));
+    for (const id of p.nodes) { const w = where(id); if (w) pts.push(w); }
+    const obs = where("@observer");
+    if (obs) pts.push(obs);
+    return pts;
+  },
+  fly(p, delay, selected = false) {
+    const kind = typeKind(p.type);
+    if (!state.kinds.has(kind)) return;
+    const pts = this.points(p);
+    if (!pts.length) return;
+    anim.add({ points: pts, kind, t0: performance.now() + delay, duration: Math.min(4500, 550 * Math.max(1, pts.length - 1)), selected });
+  },
+  addToFeed(p) {
+    this.feed.unshift(p); this.feed = this.feed.slice(0, 60);
+    const li = document.createElement("li");
+    const [, name] = typeInfo(p.type);
+    const who = [p.sender ? `от ${esc(p.sender)}` : "", p.addressee ? `→ ${p.type === 5 || p.type === 6 ? "канал " : ""}${esc(p.addressee)}` : p.type === 4 ? "→ всем" : ""].filter(Boolean).join(" ");
+    li.innerHTML = `<div class="top"><span class="time">${new Date(p.at).toLocaleTimeString("ru-RU")}</span>` +
+      `<i class="dot" style="background:${COLOURS[typeKind(p.type)]}"></i><b>${name}</b> ${proto(p.type)}</div>` +
+      `<div class="who">${who || "отправитель не назван"}</div>` +
+      `<div class="pkt">${p.flood ? `${p.hops} ${plural(p.hops, "переход", "перехода", "переходов")}` : esc(p.route)}` +
+      `${p.snr != null ? ` · SNR ${p.snr}` : ""}${p.rssi != null ? ` · RSSI ${p.rssi}` : ""} · ${p.bytes} байт</div>`;
+    li.addEventListener("click", () => { this.fly(p, 0, true); this.card(p); });
+    const feed = document.getElementById("feed");
+    feed.prepend(li);
+    while (feed.children.length > 60) feed.lastChild.remove();
+  },
+  card(p) {
+    const card = document.getElementById("card"), body = document.getElementById("cardBody");
+    const [kind, name, text] = typeInfo(p.type);
+    const path = p.nodes.map((id) => { const n = state.nodes.get(id); return esc(n ? n.label : id.startsWith("?") ? "? " + id.slice(1) : id.slice(0, 8)); });
+    body.innerHTML = `<h2><i class="dot" style="background:${COLOURS[kind]}"></i> ${name} ${proto(p.type)}</h2>
+      <div class="meta">${text}</div>
+      <h3>Кто и кому</h3><div>${p.sender ? `от <b>${esc(p.sender)}</b>` : "отправитель не назван в пакете"}${p.addressee ? ` → <b>${esc(p.addressee)}</b>` : p.type === 4 ? " → всем" : ""}</div>
+      <h3>Путь к нам</h3><div>${path.length ? path.join(" → ") + " → наш observer" : p.flood ? "observer услышал отправителя напрямую" : "пакет шёл по заранее известному маршруту (" + esc(p.route) + "), путь в нём не записан"}</div>
+      <h3>Пакет</h3>${packetLine({ ...p, receptions: 1 })}
+      <div class="meta">принят ${new Date(p.at).toLocaleString("ru-RU")}</div>`;
+    card.hidden = false;
+  },
+};
+document.getElementById("pause").addEventListener("click", (ev) => {
+  live.paused = !live.paused;
+  ev.target.classList.toggle("on", live.paused);
+  ev.target.textContent = live.paused ? "Продолжить" : "Пауза";
+  if (!live.paused) live.poll(false);
+});
 
 document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => {
   if (state.mode === b.dataset.mode) return;
   state.mode = b.dataset.mode; state.selected = null; document.getElementById("card").hidden = true;
   slider.value = DEFAULT_SLIDER[state.mode]; onSlider();
   showMode(); saveView(); load(false);
+  state.mode === "live" ? live.start() : live.stop();
 }));
 document.getElementById("days").addEventListener("change", () => load(false));
 document.querySelectorAll("[data-kind]").forEach((el) => el.addEventListener("change", () => {
   el.checked ? state.kinds.add(el.dataset.kind) : state.kinds.delete(el.dataset.kind); applyFilters();
 }));
 const slider = document.getElementById("min");
-const DEFAULT_SLIDER = { path: 35, talk: 10 };   // about 11 packets per link; 2 exchanges per pair
+const DEFAULT_SLIDER = { path: 35, talk: 10, live: 35 };   // about 11 packets per link; 2 exchanges per pair
 const onSlider = () => { state.min = minFromSlider(+slider.value); document.getElementById("minOut").textContent = state.min; };
 slider.addEventListener("input", () => { onSlider(); applyFilters(); });
 document.getElementById("risks").addEventListener("change", (ev) => { state.risks = ev.target.checked; applyFilters(); });
 
 if (location.hash.endsWith("/talk")) state.mode = "talk";
+if (location.hash.endsWith("/live")) state.mode = "live";
 slider.value = DEFAULT_SLIDER[state.mode];
 showMode(); onSlider(); load(true);
+if (state.mode === "live") live.start();
 setInterval(() => load(false), 10 * 60 * 1000);   // the calculations run hourly; every 10 minutes is plenty

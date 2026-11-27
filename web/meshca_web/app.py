@@ -115,6 +115,56 @@ def load_link(conn: psycopg.Connection, source: str, target: str, days: int) -> 
     }
 
 
+LIVE_SQL = """
+SELECT r.id, r.received_at, p.payload_type, route_type_name(r.route_type), r.hop_count, r.snr, r.rssi, r.packet_len,
+       p.hash, r.path, r.route_type IN (0, 1) AS flood,
+       (SELECT array_agg(h.node_id ORDER BY h.position) FROM v_hop_resolved h WHERE h.reception_id = r.id) AS nodes,
+       coalesce(s.sender, (SELECT coalesce(n.name, left(o.pubkey, 8)) FROM origin_resolution o
+                           LEFT JOIN node n ON n.pubkey = o.pubkey
+                           WHERE o.packet_hash = p.hash AND o.rank = 1 AND o.probability >= 0.7),
+                CASE WHEN d.src_hash IS NOT NULL THEN hash_names(d.src_hash) END) AS sender,
+       s.pubkey AS sender_key,
+       coalesce(CASE WHEN d.dst_hash IS NOT NULL THEN hash_names(d.dst_hash) END,
+                CASE WHEN q.dst_hash IS NOT NULL THEN hash_names(q.dst_hash) END, m.channel) AS addressee
+FROM reception r JOIN packet p ON p.hash = r.packet_hash
+LEFT JOIN LATERAL (SELECT sender, pubkey FROM v_sender v WHERE v.packet_hash = p.hash LIMIT 1) s ON true
+LEFT JOIN direct_packet d ON d.packet_hash = p.hash
+LEFT JOIN anon_request q ON q.packet_hash = p.hash
+LEFT JOIN channel_message m ON m.packet_hash = p.hash
+"""
+LIVE_FIELDS = ("id", "at", "type", "route", "hops", "snr", "rssi", "bytes", "hash", "path", "flood", "nodes", "sender",
+               "sender_key", "addressee")
+
+
+def load_live(conn: psycopg.Connection, after: int) -> dict:
+    """Receptions newer than `after` (reception id), oldest first. The first call gets the latest few as a start."""
+    if after <= 0:
+        rows = conn.execute(LIVE_SQL + "ORDER BY r.id DESC LIMIT 25").fetchall()[::-1]
+    else:
+        rows = conn.execute(LIVE_SQL + "WHERE r.id > %s ORDER BY r.id LIMIT 200", (after,)).fetchall()
+    packets = [dict(zip(LIVE_FIELDS, r)) for r in rows]
+    # A path the hourly calculation has not seen yet stays as "?prefix"; a prefix that fits exactly one known
+    # repeater is named right away, so a new packet can still be drawn along its way.
+    repeaters: dict[str, list[str]] = {}
+    coords: dict[str, tuple] = {}
+    for pubkey, lat, lon, role in conn.execute("SELECT pubkey, lat, lon, role FROM node").fetchall():
+        if role in (2, 3):
+            repeaters.setdefault(pubkey[:2], []).append(pubkey)
+        if lat is not None and lon is not None and not (lat == 0 and lon == 0):
+            coords[pubkey] = (lat, lon)
+    for p in packets:
+        nodes = []
+        for prefix, node_id in zip(p["path"] or [], p["nodes"] or [None] * len(p["path"] or [])):
+            if node_id is None or node_id.startswith("?"):
+                fits = [k for k in repeaters.get(prefix[:2], []) if k.startswith(prefix)]
+                node_id = fits[0] if len(fits) == 1 else "?" + prefix
+            nodes.append(node_id)
+        p["nodes"] = nodes if p["flood"] else []
+        p["coords"] = {i: coords[i] for i in nodes + ([p["sender_key"]] if p["sender_key"] else []) if i in coords}
+    cursor = packets[-1]["id"] if packets else max(after, conn.execute("SELECT coalesce(max(id), 0) FROM reception").fetchone()[0])
+    return {"packets": packets, "cursor": cursor}
+
+
 def load_node(conn: psycopg.Connection, node_id: str) -> dict:
     row = conn.execute(
         "SELECT name, node_role_name(role), lat, lon, first_seen, last_seen, advert_count FROM node WHERE pubkey = %s",
@@ -168,6 +218,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "days must be a number"}, 400)
                 with connect() as conn:
                     return self._json(load_graph(conn, days) if url.path == "/api/graph" else load_talk(conn, days))
+            if url.path == "/api/live":
+                try:
+                    after = int(query.get("after", ["0"])[0])
+                except ValueError:
+                    return self._json({"error": "after must be a number"}, 400)
+                with connect() as conn:
+                    return self._json(load_live(conn, after))
             if url.path == "/api/link":
                 source, target = query.get("source", [""])[0], query.get("target", [""])[0]
                 try:
