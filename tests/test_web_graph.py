@@ -13,7 +13,7 @@ def test_flows_positions_and_critical_nodes():
     nodes = {n["id"]: n for n in out["nodes"]}
 
     assert nodes["aa"]["label"] == "Alpha" and nodes["aa"]["placed"] == "own" and nodes["aa"]["relayed"] == 10
-    assert nodes["bb"]["mix"] == {"adverts": 6, "channel": 4, "direct": 2} and nodes["bb"]["critical"] == ["Alpha"]
+    assert nodes["bb"]["mix"] == {"adverts": 6, "channel": 4, "direct": 2, "service": 0} and nodes["bb"]["critical"] == ["Alpha"]
     # The observer counts what it received; its place is guessed from its only neighbour.
     obs = nodes[OBSERVER]
     assert obs["kind"] == "observer" and obs["heard"] == 12 and obs["relayed"] == 12 and obs["placed"] == "neighbours"

@@ -138,11 +138,12 @@ def build_topology(conn: psycopg.Connection, window_days: int) -> dict:
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("DELETE FROM edge_daily WHERE day >= %s::date", (since,))
         cur.execute("""
-            INSERT INTO edge_daily (day, from_node, to_node, packets, adverts, channel, direct)
+            INSERT INTO edge_daily (day, from_node, to_node, packets, adverts, channel, direct, service)
             SELECT day, from_node, to_node, count(DISTINCT e.packet_hash),
                    count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type = 4),
                    count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type IN (5, 6)),
-                   count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type IN (0, 1, 2, 3, 7, 8))
+                   count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type IN (2, 3)),
+                   count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type IN (0, 1, 7, 8))
             FROM (
                 SELECT a.received_at::date AS day, a.packet_hash, a.node_id AS from_node,
                        b.node_id AS to_node

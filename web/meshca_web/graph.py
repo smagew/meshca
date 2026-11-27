@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 OBSERVER = "@observer"
-KINDS = ("adverts", "channel", "direct")
+KINDS = ("adverts", "channel", "direct", "service")
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,8 @@ class Edge:
     packets: int
     adverts: int = 0
     channel: int = 0
-    direct: int = 0
+    direct: int = 0              # private messages and their acknowledgements
+    service: int = 0             # requests to repeaters and rooms, answers, anonymous requests, returned paths
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,8 @@ def build(edges: list[Edge], info: dict[str, NodeInfo], critical: dict[str, list
         # What a node passed on; for the observer, what it received.
         sides = (e.source, e.target) if e.target == OBSERVER else (e.source,)
         for side in sides:
-            for key, value in (("packets", e.packets), ("adverts", e.adverts), ("channel", e.channel), ("direct", e.direct)):
+            for key, value in (("packets", e.packets), ("adverts", e.adverts), ("channel", e.channel), ("direct", e.direct),
+                               ("service", e.service)):
                 flow[side][key] += value
         heard[e.target] += e.packets
 
@@ -96,6 +98,7 @@ def build(edges: list[Edge], info: dict[str, NodeInfo], critical: dict[str, list
     return {
         "nodes": nodes,
         "edges": [{"source": e.source, "target": e.target, "packets": e.packets,
-                   "mix": {"adverts": e.adverts, "channel": e.channel, "direct": e.direct}} for e in edges],
+                   "mix": {"adverts": e.adverts, "channel": e.channel, "direct": e.direct,
+                           "service": e.service}} for e in edges],
         "unplaced": sum(1 for n in nodes if n["lat"] is None),
     }

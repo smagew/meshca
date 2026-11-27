@@ -31,7 +31,8 @@ def connect() -> psycopg.Connection:
 
 def load_graph(conn: psycopg.Connection, days: int) -> dict:
     edges = [graph.Edge(*row) for row in conn.execute(
-        "SELECT from_node, to_node, sum(packets)::int, sum(adverts)::int, sum(channel)::int, sum(direct)::int "
+        "SELECT from_node, to_node, sum(packets)::int, sum(adverts)::int, sum(channel)::int, sum(direct)::int, "
+        "sum(service)::int "
         "FROM edge_daily WHERE day > current_date - %s GROUP BY 1, 2", (days,)).fetchall()]
     ids = list({e.source for e in edges} | {e.target for e in edges})
     info = {pubkey: graph.NodeInfo(name, role, lat, lon) for pubkey, name, role, lat, lon in conn.execute(

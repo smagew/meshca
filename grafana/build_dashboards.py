@@ -508,7 +508,7 @@ def node_map() -> Board:
 
 
 # Link graph (node graph panel). Colours of the kinds of packets, shared by edges and the rings around nodes.
-KIND_COLOURS = {"объявления": "#5794F2", "каналы": "#73BF69", "личные": "#FF9830"}
+KIND_COLOURS = {"объявления": "#5794F2", "каналы": "#73BF69", "адресные": "#FF9830"}
 GEO_SCALE = 60          # pixels per km ** 0.55 from the observer
 
 
@@ -557,9 +557,9 @@ def graph_queries(edges_sql: str, geo: bool) -> list[str]:
                CASE WHEN pos.id = '@observer' THEN '#B877D9' WHEN flow.p IS NULL THEN '#8E8E8E'
                     WHEN GREATEST(flow.a, flow.cc, flow.d) = flow.a THEN '{KIND_COLOURS["объявления"]}'
                     WHEN GREATEST(flow.a, flow.cc, flow.d) = flow.cc THEN '{KIND_COLOURS["каналы"]}'
-                    ELSE '{KIND_COLOURS["личные"]}' END AS color,
+                    ELSE '{KIND_COLOURS["адресные"]}' END AS color,
                flow.a AS "detail__объявлений передал", flow.cc AS "detail__сообщений каналов передал",
-               flow.d AS "detail__личных пакетов передал",
+               flow.d AS "detail__адресных пакетов передал",
                CASE WHEN pos.guessed AND pos.lat IS NOT NULL THEN 'примерное, среди соседей'
                     WHEN pos.lat IS NULL THEN 'неизвестно' ELSE 'из объявления' END AS "detail__место",
                cn.senders AS "detail__кого отрежет"{fixed}
@@ -569,12 +569,12 @@ def graph_queries(edges_sql: str, geo: bool) -> list[str]:
         WITH e AS ({edges_sql})
         SELECT from_node || '>' || to_node AS id, from_node AS source, to_node AS target, p::text AS mainstat,
                'объявления ' || round(100.0 * a / nullif(p, 0)) || '% · каналы ' || round(100.0 * c / nullif(p, 0))
-                   || '% · личные ' || round(100.0 * d / nullif(p, 0)) || '%' AS secondarystat,
+                   || '% · адресные ' || round(100.0 * d / nullif(p, 0)) || '%' AS secondarystat,
                least(12, 1 + 1.4 * ln(greatest(p, 1)))::int AS thickness,
                CASE GREATEST(a, c, d) WHEN a THEN '{KIND_COLOURS["объявления"]}' WHEN c THEN '{KIND_COLOURS["каналы"]}'
-                    ELSE '{KIND_COLOURS["личные"]}' END AS color,
+                    ELSE '{KIND_COLOURS["адресные"]}' END AS color,
                CASE WHEN left(from_node, 1) = '?' OR left(to_node, 1) = '?' THEN '6 4' END AS strokedasharray,
-               a AS "detail__объявлений", c AS "detail__сообщений каналов", d AS "detail__личных пакетов"
+               a AS "detail__объявлений", c AS "detail__сообщений каналов", d AS "detail__адресных пакетов"
         FROM e"""
     return [nodes, edges]
 
@@ -586,11 +586,11 @@ def topology() -> Board:
               time_from="now-7d")
     edges = f"""(SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily
                  WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e"""
-    edges_kinds = """SELECT from_node, to_node, sum(packets) AS p, sum(adverts) AS a, sum(channel) AS c, sum(direct) AS d
+    edges_kinds = """SELECT from_node, to_node, sum(packets) AS p, sum(adverts) AS a, sum(channel) AS c, sum(direct) + sum(service) AS d
                      FROM edge_daily WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date
                      GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200"""
     graph_legend = ("Толщина линии — сколько пакетов прошло по связи, стрелка — куда. Цвет линии — чего больше "
-                    "всего везёт связь: синий — объявления, зелёный — сообщения каналов, оранжевый — личные пакеты. "
+                    "всего везёт связь: синий — объявления, зелёный — сообщения каналов, оранжевый — адресные пакеты (одному узлу: личные сообщения, запросы и ответы). "
                     "Пунктир — один из концов не определён по префиксу (показан как «? префикс»). Размер кружка — "
                     "сколько пакетов узел передал дальше, цвет кольца — каких пакетов он передаёт больше всего, в тех же "
                     "цветах; фиолетовый — наш observer. Красный кружок с надписью «критичный» — без этого узла какие-то "

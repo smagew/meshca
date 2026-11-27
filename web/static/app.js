@@ -2,13 +2,13 @@
    pie-chart icons. Everything is computed from /api/graph; /api/node adds what the directory knows about a node. */
 "use strict";
 
-const COLOURS = { adverts: "#5b9cff", channel: "#5fd38d", direct: "#ffa24c" };
-const KIND_NAMES = { adverts: "объявления", channel: "каналы", direct: "адресные" };
+const COLOURS = { adverts: "#5b9cff", channel: "#5fd38d", direct: "#ffa24c", service: "#a9b3bf" };
+const KIND_NAMES = { adverts: "объявления", channel: "каналы", direct: "личные сообщения", service: "служебные" };
 const CRIT = "#ff4d5e", OBS = "#b980ff", UNKNOWN = "#8b95a3";
 
 const state = {
   data: null, nodes: new Map(), markers: new Map(),
-  kinds: new Set(["adverts", "channel", "direct"]), min: 5, risks: false,
+  kinds: new Set(["adverts", "channel", "direct", "service"]), min: 5, risks: false,
   hover: null, selected: null, visibleEdges: [], visibleNodes: new Set(),
 };
 
