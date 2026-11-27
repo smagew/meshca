@@ -507,6 +507,78 @@ def node_map() -> Board:
     return b
 
 
+# Link graph (node graph panel). Colours of the kinds of packets, shared by edges and the rings around nodes.
+KIND_COLOURS = {"объявления": "#5794F2", "каналы": "#73BF69", "личные": "#FF9830"}
+GEO_SCALE = 60          # pixels per km ** 0.55 from the observer
+
+
+def graph_queries(edges_sql: str, geo: bool) -> list[str]:
+    """Two frames for the node graph: nodes and edges. With geo, nodes are pinned to their coordinates."""
+    base = f"""
+        WITH e AS ({edges_sql}),
+        ids AS (SELECT from_node AS id FROM e UNION SELECT to_node FROM e),
+        own AS (SELECT i.id, n.lat, n.lon, n.role FROM ids i LEFT JOIN node n ON n.pubkey = i.id),
+        nb AS (SELECT o.id, avg(x.lat) AS lat, avg(x.lon) AS lon
+               FROM own o JOIN e ON o.id IN (e.from_node, e.to_node)
+               JOIN own x ON x.id = CASE WHEN e.from_node = o.id THEN e.to_node ELSE e.from_node END
+               WHERE x.lat IS NOT NULL AND o.lat IS NULL GROUP BY o.id),
+        pos AS (SELECT o.id, o.role, o.lat IS NULL AS guessed,
+                       coalesce(o.lat, nb.lat + (('x' || substr(md5(o.id), 1, 4))::bit(16)::int % 100 - 50) / 8000.0) AS lat,
+                       coalesce(o.lon, nb.lon + (('x' || substr(md5(o.id), 5, 4))::bit(16)::int % 100 - 50) / 5000.0) AS lon
+                FROM own o LEFT JOIN nb USING (id)),
+        c AS (SELECT coalesce(max(lat) FILTER (WHERE id = '@observer'), avg(lat)) AS lat0,
+                     coalesce(max(lon) FILTER (WHERE id = '@observer'), avg(lon)) AS lon0 FROM pos),
+        flow AS (SELECT id, sum(p) AS p, sum(a) AS a, sum(cc) AS cc, sum(d) AS d FROM (
+                     SELECT from_node AS id, p, a, c AS cc, d FROM e
+                     UNION ALL SELECT to_node, p, a, c, d FROM e WHERE to_node = '@observer') f GROUP BY id),
+        out AS (SELECT from_node AS id, sum(p) AS relayed FROM e GROUP BY 1)"""
+    k = GEO_SCALE
+    # Distances from the observer are compressed (radius ** 0.55): the dense area around it opens up, far nodes come
+    # closer, directions stay true, north is up. Every node needs a place: those with no coordinates and no placed
+    # neighbour go into a row under the drawing.
+    fixed = (f""",
+               coalesce(round((CASE WHEN pos.id = '@observer' THEN 0 ELSE g.px * g.dx / nullif(g.r, 0) END)::numeric),
+                        -{k} * 12 + 90 * (row_number() OVER (PARTITION BY g.r IS NULL ORDER BY pos.id) - 1)) AS fixedx,
+               coalesce(round((CASE WHEN pos.id = '@observer' THEN 0 ELSE -g.px * g.dy / nullif(g.r, 0) END)::numeric),
+                        {k} * 14) AS fixedy""" if geo else "")
+    geo_join = f"""
+        LEFT JOIN LATERAL (SELECT d.dx, d.dy, sqrt(d.dx * d.dx + d.dy * d.dy) AS r,
+                                  40 + {k} * power(sqrt(d.dx * d.dx + d.dy * d.dy), 0.55) AS px
+                           FROM (SELECT (pos.lon - c.lon0) * 111.32 * cos(radians(c.lat0)) AS dx,
+                                        (pos.lat - c.lat0) * 110.57 AS dy) d) g ON true""" if geo else ""
+    nodes = base + f"""
+        SELECT pos.id, node_label(pos.id) AS title,
+               CASE WHEN pos.id = '@observer' THEN 'наш observer' WHEN left(pos.id, 1) = '?' THEN 'не определён'
+                    ELSE coalesce(node_role_name(pos.role), 'нет в справочнике') END AS subtitle,
+               coalesce(out.relayed, flow.p, 0)::text AS mainstat,
+               CASE WHEN cn.node IS NOT NULL THEN 'критичный: отрежет ' || cn.senders_cut END AS secondarystat,
+               (10 + least(30, 1.2 * sqrt(coalesce(out.relayed, flow.p, 0))))::int AS noderadius,
+               cn.node IS NOT NULL AS highlighted,
+               CASE WHEN pos.id = '@observer' THEN '#B877D9' WHEN flow.p IS NULL THEN '#8E8E8E'
+                    WHEN GREATEST(flow.a, flow.cc, flow.d) = flow.a THEN '{KIND_COLOURS["объявления"]}'
+                    WHEN GREATEST(flow.a, flow.cc, flow.d) = flow.cc THEN '{KIND_COLOURS["каналы"]}'
+                    ELSE '{KIND_COLOURS["личные"]}' END AS color,
+               flow.a AS "detail__объявлений передал", flow.cc AS "detail__сообщений каналов передал",
+               flow.d AS "detail__личных пакетов передал",
+               CASE WHEN pos.guessed AND pos.lat IS NOT NULL THEN 'примерное, среди соседей'
+                    WHEN pos.lat IS NULL THEN 'неизвестно' ELSE 'из объявления' END AS "detail__место",
+               cn.senders AS "detail__кого отрежет"{fixed}
+        FROM pos CROSS JOIN c LEFT JOIN out USING (id) LEFT JOIN flow USING (id)
+        LEFT JOIN critical_node cn ON cn.node = pos.id{geo_join}"""
+    edges = f"""
+        WITH e AS ({edges_sql})
+        SELECT from_node || '>' || to_node AS id, from_node AS source, to_node AS target, p::text AS mainstat,
+               'объявления ' || round(100.0 * a / nullif(p, 0)) || '% · каналы ' || round(100.0 * c / nullif(p, 0))
+                   || '% · личные ' || round(100.0 * d / nullif(p, 0)) || '%' AS secondarystat,
+               least(12, 1 + 1.4 * ln(greatest(p, 1)))::int AS thickness,
+               CASE GREATEST(a, c, d) WHEN a THEN '{KIND_COLOURS["объявления"]}' WHEN c THEN '{KIND_COLOURS["каналы"]}'
+                    ELSE '{KIND_COLOURS["личные"]}' END AS color,
+               CASE WHEN left(from_node, 1) = '?' OR left(to_node, 1) = '?' THEN '6 4' END AS strokedasharray,
+               a AS "detail__объявлений", c AS "detail__сообщений каналов", d AS "detail__личных пакетов"
+        FROM e"""
+    return [nodes, edges]
+
+
 def topology() -> Board:
     b = Board(*BOARDS[7], ONE_POINT + " Связь «A → B» значит: B принял пакет от A и передал дальше. Все маршруты "
               "ведут к нашему observer'у, поэтому это не вся сеть, а её часть, обращённая к нам. Выводы о критичных "
@@ -514,14 +586,29 @@ def topology() -> Board:
               time_from="now-7d")
     edges = f"""(SELECT from_node, to_node, sum(packets) AS packets FROM edge_daily
                  WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date GROUP BY 1, 2) e"""
-    b.add("nodeGraph", "Граф связей", [f"""
-        SELECT id, node_label(id) AS title, sum(packets)::text AS mainstat FROM (
-            SELECT from_node AS id, packets FROM {edges} UNION ALL
-            SELECT to_node, 0 FROM {edges.replace(') e', ') e2')}) x GROUP BY id""", f"""
-        SELECT from_node || '>' || to_node AS id, from_node AS source, to_node AS target, packets::text AS mainstat
-        FROM {edges} ORDER BY packets DESC LIMIT 150"""], 24, 16, ref_ids=["nodes", "edges"],
-          description="Число у узла — сколько пакетов он передал дальше, у связи — сколько пакетов по ней прошло. "
-                      "В связи попадают 150 самых загруженных; узлы без таких связей показаны отдельно стоящими.")
+    edges_kinds = """SELECT from_node, to_node, sum(packets) AS p, sum(adverts) AS a, sum(channel) AS c, sum(direct) AS d
+                     FROM edge_daily WHERE day >= $__timeFrom()::date AND day <= $__timeTo()::date
+                     GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 200"""
+    graph_legend = ("Толщина линии — сколько пакетов прошло по связи, стрелка — куда. Цвет линии — чего больше "
+                    "всего везёт связь: синий — объявления, зелёный — сообщения каналов, оранжевый — личные пакеты. "
+                    "Пунктир — один из концов не определён по префиксу (показан как «? префикс»). Размер кружка — "
+                    "сколько пакетов узел передал дальше, цвет кольца — каких пакетов он передаёт больше всего, в тех же "
+                    "цветах; фиолетовый — наш observer. Красный кружок с надписью «критичный» — без этого узла какие-то "
+                    "отправители перестанут до нас доходить. Нажмите на узел или связь — покажутся подробности. "
+                    "Показаны 200 самых загруженных связей выбранного периода.")
+    b.add("nodeGraph", "Граф связей: по координатам", graph_queries(edges_kinds, geo=True), 24, 22,
+          ref_ids=["nodes", "edges"],
+          description="Наш observer в центре, узлы — в своих направлениях от него по координатам из объявлений, "
+                      "север сверху. Расстояния сжаты: дальние узлы нарисованы ближе, чем на самом деле, чтобы "
+                      "раздвинуть плотные места рядом с нами. Узел без координат поставлен среди своих соседей "
+                      "(в подсказке — «место примерное»); если и соседей нет — в ряд внизу. Колёсиком мыши можно "
+                      "приблизить. Очень длинная связь — повод проверить, верно ли определён узел. "
+                      + graph_legend)
+    b.add("nodeGraph", "Граф связей: свободная раскладка", graph_queries(edges_kinds.replace("LIMIT 200", "LIMIT 100"), geo=False), 24, 18,
+          ref_ids=["nodes", "edges"],
+          description="100 самых загруженных связей, расставленные так, чтобы не налезали друг на друга. Дальние "
+                      "узлы Grafana сворачивает в метки по краям: нажатие на метку разворачивает их. "
+                      + graph_legend.replace("Показаны 200 самых загруженных связей выбранного периода.", ""))
     b.table("Критичные узлы", """
         SELECT node_label(node) AS "узел", senders_cut AS "отправителей отрежет",
                array_to_string(senders, ', ') AS "кто перестанет до нас доходить"

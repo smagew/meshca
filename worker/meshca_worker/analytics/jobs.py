@@ -138,8 +138,12 @@ def build_topology(conn: psycopg.Connection, window_days: int) -> dict:
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("DELETE FROM edge_daily WHERE day >= %s::date", (since,))
         cur.execute("""
-            INSERT INTO edge_daily (day, from_node, to_node, packets)
-            SELECT day, from_node, to_node, count(DISTINCT packet_hash) FROM (
+            INSERT INTO edge_daily (day, from_node, to_node, packets, adverts, channel, direct)
+            SELECT day, from_node, to_node, count(DISTINCT e.packet_hash),
+                   count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type = 4),
+                   count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type IN (5, 6)),
+                   count(DISTINCT e.packet_hash) FILTER (WHERE p.payload_type IN (0, 1, 2, 3, 7, 8))
+            FROM (
                 SELECT a.received_at::date AS day, a.packet_hash, a.node_id AS from_node,
                        b.node_id AS to_node
                 FROM v_hop_resolved a JOIN v_hop_resolved b ON b.reception_id = a.reception_id AND b.position = a.position + 1
@@ -147,7 +151,8 @@ def build_topology(conn: psycopg.Connection, window_days: int) -> dict:
                 UNION ALL
                 SELECT received_at::date, packet_hash, node_id, '@observer'
                 FROM v_hop_resolved WHERE from_end = 0 AND received_at >= %(since)s::date
-            ) e WHERE from_node <> to_node GROUP BY 1, 2, 3""", {"since": since})
+            ) e JOIN packet p ON p.hash = e.packet_hash
+            WHERE from_node <> to_node GROUP BY 1, 2, 3""", {"since": since})
         edges = cur.rowcount
 
         # One row per reception of a packet whose sender is certain: the route as a list of node ids.
