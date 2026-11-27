@@ -361,7 +361,7 @@ function edgeTip(e) {
     h += mixTable(e.mix);
     h += `<p>Это дорога, по которой пакеты шли к нам, а не адресат: пакеты могли быть для кого угодно. Кто кому пишет — во втором режиме.</p>`;
     if (e.uncertain) h += `<div class="badge note"><b>Пунктир:</b> один из узлов не определён или стоит на карте примерно.</div>`;
-    return h;
+    return h + `<div class="foot">Нажмите на линию — какие именно пакеты по ней шли и кому</div>`;
   }
   let h = `<div class="t">${esc(s.label)} ↔ ${esc(t.label)}</div><div class="k">обмен ${periodText()}, последний раз ${when(e.last)}</div><ul>`;
   if (e.mix.direct) h += `<li><b style="color:${COLOURS.direct}">${fmt(e.mix.direct)}</b> ${plural(e.mix.direct, "личное сообщение", "личных сообщения", "личных сообщений")} — переписка двух людей</li>`;
@@ -369,7 +369,7 @@ function edgeTip(e) {
   if (e.mix.channel) h += `<li><b style="color:${COLOURS.channel}">${fmt(e.mix.channel)}</b> ${plural(e.mix.channel, "ответ", "ответа", "ответов")} друг другу в каналах ${e.channels.map(esc).join(", ")}: обращение @[имя] или ответ сразу после сообщения другого</li>`;
   h += `</ul><div class="num">${esc(s.label)} → ${esc(t.label)}: <b>${fmt(e.a_to_b)}</b> &nbsp;·&nbsp; ${esc(t.label)} → ${esc(s.label)}: <b>${fmt(e.b_to_a)}</b></div>`;
   if (e.uncertain) h += `<div class="badge note"><b>Пунктир: собеседник определён неуверенно.</b> В личных пакетах видны только первые два символа ключа, и по ним нельзя точно сказать, кто это.</div>`;
-  return h;
+  return h + `<div class="foot">Нажмите на линию — список обменов по видам</div>`;
 }
 
 // ---------- help for the controls ----------
@@ -407,9 +407,100 @@ map.on("mousemove", (ev) => {
 });
 map.on("click", (ev) => {
   const e = edgeLayer.edgeAt(ev.containerPoint);
-  if (e) select(state.selected === e.source ? e.target : e.source);
+  if (e) openLink(e);
   else if (state.selected) closeCard();
 });
+
+// ---------- link card: what exactly a link is made of ----------
+const TYPE_INFO = {
+  0: ["service", "запрос к узлу", "приложение просит у ретранслятора или комнаты вход, состояние, телеметрию или соседей; что именно — зашифровано"],
+  1: ["service", "ответ узла", "ответ ретранслятора или комнаты на запрос: состояние, телеметрия, подтверждение входа"],
+  2: ["direct", "личное сообщение", "сообщение одного устройства другому; если получатель — ретранслятор, это команда его консоли"],
+  3: ["direct", "подтверждение доставки", "получатель сообщает отправителю, что сообщение дошло"],
+  4: ["adverts", "объявление", "узел сообщает всем: «я есть», имя, роль, координаты"],
+  5: ["channel", "сообщение в канале", "текст в общем чате"],
+  6: ["channel", "данные в канале", "не текст, а данные для всех подписчиков канала"],
+  7: ["service", "анонимный запрос", "устройство, ещё не знакомое узлу, входит в комнату или на ретранслятор (обычно с паролем)"],
+  8: ["service", "обратный путь", "узел сообщает отправителю, каким путём отвечать ему напрямую, без рассылки по всей сети"],
+  9: ["service", "трассировка", "проверка пути: каждый ретранслятор по дороге добавляет уровень сигнала"],
+  10: ["service", "часть составного пакета", "кусок большого сообщения, разбитого на несколько пакетов"],
+  11: ["service", "управляющий пакет", "служебный обмен узлов, например поиск соседей"],
+  15: ["service", "особый пакет", "пакет нестандартного формата"],
+};
+const typeInfo = (t) => (t === "channel" ? ["channel", "ответ в канале", "обращение @[имя] или ответ сразу после сообщения другого"] : TYPE_INFO[t] || ["service", `тип ${t}`, ""]);
+
+function kindsTable(counts, info = typeInfo) {
+  const total = counts.reduce((s, c) => s + c.n, 0) || 1;
+  return `<table class="kinds-table">${counts.map((c) => {
+    const [kind, name, text] = info(c.type);
+    return `<tr class="ktype" data-type="${c.type}"><td><i class="dot" style="background:${COLOURS[kind]}"></i></td>` +
+      `<td><b>${name}</b><div class="meta">${text}</div></td><td class="n">${fmt(c.n)}<div class="meta">${Math.round((100 * c.n) / total)}%</div></td></tr>`;
+  }).join("")}</table>`;
+}
+
+async function openLink(e) {
+  state.selected = null; setFocus();
+  const s = state.nodes.get(e.source), t = state.nodes.get(e.target);
+  const card = document.getElementById("card"), body = document.getElementById("cardBody");
+  card.hidden = false;
+  const node = (n) => `<span class="link" data-id="${esc(n.id)}">${esc(n.label)}</span>`;
+  const bindNodes = () => body.querySelectorAll(".link[data-id]").forEach((el) => el.addEventListener("click", () => select(el.dataset.id)));
+  const filterable = (render) => {
+    body.querySelectorAll(".ktype").forEach((row) => row.addEventListener("click", () => {
+      const on = !row.classList.contains("sel");
+      body.querySelectorAll(".ktype").forEach((r) => r.classList.remove("sel"));
+      if (on) row.classList.add("sel");
+      render(on ? row.dataset.type : null);
+    }));
+  };
+  if (state.mode === "talk") {
+    // Between a device and a repeater a text message is a command to the repeater's console.
+    const repeater = [s, t].some((n) => n.role === "ретранслятор");
+    const info = (type) => (repeater && +type === 2
+      ? ["service", "команда ретранслятору", "текстовая команда его удалённой консоли (настройки, статус, перезапуск); текст зашифрован"]
+      : typeInfo(type));
+    const counts = Object.entries(e.items.reduce((m, i) => ((m[i[1]] = (m[i[1]] || 0) + 1), m), {}))
+      .map(([type, n]) => ({ type: isNaN(+type) ? type : +type, n })).sort((a, b) => b.n - a.n);
+    body.innerHTML = `<h2>${node(s)} ↔ ${node(t)}</h2>
+      <div class="meta">Что эти двое отправляли друг другу ${periodText()}. Нажмите на строку — останутся только такие пакеты.</div>
+      <h3>Из чего состоит</h3>${kindsTable(counts, info)}
+      <h3>Последние обмены</h3><div id="linkList"></div>`;
+    const render = (type) => {
+      const items = e.items.filter((i) => type == null || String(i[1]) === String(type)).slice(0, 80);
+      document.getElementById("linkList").innerHTML = `<table>${items.map((i) => {
+        const [from, to] = i[2] ? [s, t] : [t, s];
+        return `<tr><td class="when">${when(i[0])}</td><td>${esc(from.label)} → ${esc(to.label)}<div class="meta">${info(i[1])[1]}${i[3] ? " · " + esc(i[3]) : ""}</div></td></tr>`;
+      }).join("")}</table>` + (e.items.length >= 150 ? `<div class="meta">показаны последние 150</div>` : "");
+    };
+    render(null); filterable(render); bindNodes();
+    return;
+  }
+  body.innerHTML = `<h2>${node(s)} → ${node(t)}</h2>
+    <div class="meta">${esc(t.label)} услышал эти пакеты от ${esc(s.label)} и передал дальше, к нам. Это дорога пакетов: адресованы они могли быть кому угодно — кому именно, видно в списке ниже.</div>
+    <div class="meta">Загрузка…</div>`;
+  bindNodes();
+  let data;
+  try {
+    data = await (await fetch(`api/link?source=${encodeURIComponent(e.source)}&target=${encodeURIComponent(e.target)}&days=${document.getElementById("days").value}`)).json();
+  } catch { body.querySelector(".meta:last-child").textContent = "Не удалось загрузить"; return; }
+  const counts = data.kinds.map((k) => ({ type: k.type, n: k.packets }));
+  body.innerHTML = `<h2>${node(s)} → ${node(t)}</h2>
+    <div class="meta">${esc(t.label)} услышал эти пакеты от ${esc(s.label)} и передал дальше, к нам, ${periodText()}. Это дорога пакетов: адресованы они могли быть кому угодно — кому именно, видно в списке ниже. Нажмите на строку — останутся только такие пакеты.</div>
+    <h3>Из чего состоит</h3>${kindsTable(counts)}
+    <h3>Последние пакеты</h3><div id="linkList"></div>`;
+  const render = (type) => {
+    const rows = data.packets.filter((p) => type == null || String(p.type) === String(type)).slice(0, 80);
+    document.getElementById("linkList").innerHTML = rows.length ? `<table>${rows.map((p) => {
+      const [, name] = typeInfo(p.type);
+      const who = p.sender ? `от <b>${esc(p.sender)}</b>` : "отправитель неизвестен";
+      const to = p.addressee ? ` → ${p.type === 5 || p.type === 6 ? "в канал " : ""}<b>${esc(p.addressee)}</b>` : p.type === 4 ? " → всем" : "";
+      const path = p.path && p.path.length ? `<div class="meta path">путь: ${p.path.map(esc).join(" → ")} → наш observer</div>` : "";
+      return `<tr><td class="when">${new Date(p.at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td>` +
+        `<td>${name}<div class="meta">${who}${to}</div>${path}</td></tr>`;
+    }).join("")}</table>` + (data.packets.length >= 150 ? `<div class="meta">показаны последние 150</div>` : "") : `<div class="meta">Нет пакетов</div>`;
+  };
+  render(null); filterable(render); bindNodes();
+}
 map.on("zoomend", setFocus);
 
 // ---------- node card ----------

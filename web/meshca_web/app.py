@@ -69,6 +69,51 @@ def load_talk(conn: psycopg.Connection, days: int) -> dict:
     return result
 
 
+LINK_SQL = """
+WITH hop AS (
+    SELECT a.packet_hash, a.reception_id FROM v_hop_resolved a
+    JOIN v_hop_resolved b ON b.reception_id = a.reception_id AND b.position = a.position + 1
+    WHERE a.node_id = %(source)s AND b.node_id = %(target)s AND a.received_at > now() - make_interval(days => %(days)s)
+    UNION ALL
+    SELECT packet_hash, reception_id FROM v_hop_resolved
+    WHERE %(target)s = '@observer' AND node_id = %(source)s AND from_end = 0
+      AND received_at > now() - make_interval(days => %(days)s)
+), pkt AS (
+    SELECT packet_hash, min(reception_id) AS reception_id FROM hop GROUP BY packet_hash
+)
+"""
+
+
+def load_link(conn: psycopg.Connection, source: str, target: str, days: int) -> dict:
+    """What exactly passed from source to target on the way to the observer: kinds and the latest packets."""
+    args = {"source": source, "target": target, "days": days}
+    kinds = conn.execute(LINK_SQL + """
+        SELECT p.payload_type, count(*) FROM pkt JOIN packet p ON p.hash = pkt.packet_hash
+        GROUP BY 1 ORDER BY 2 DESC""", args).fetchall()
+    rows = conn.execute(LINK_SQL + """
+        SELECT p.first_seen, p.payload_type,
+               coalesce(s.sender, (SELECT coalesce(n.name, left(o.pubkey, 8)) FROM origin_resolution o
+                                   LEFT JOIN node n ON n.pubkey = o.pubkey
+                                   WHERE o.packet_hash = p.hash AND o.rank = 1 AND o.probability >= 0.7),
+                        CASE WHEN d.src_hash IS NOT NULL THEN hash_names(d.src_hash) END) AS sender,
+               coalesce(CASE WHEN d.dst_hash IS NOT NULL THEN hash_names(d.dst_hash) END,
+                        CASE WHEN q.dst_hash IS NOT NULL THEN hash_names(q.dst_hash) END,
+                        m.channel) AS addressee,
+               (SELECT array_agg(h.label ORDER BY h.position) FROM v_hop_resolved h WHERE h.reception_id = pkt.reception_id) AS path,
+               p.reception_count
+        FROM pkt JOIN packet p ON p.hash = pkt.packet_hash
+        LEFT JOIN LATERAL (SELECT sender FROM v_sender v WHERE v.packet_hash = p.hash LIMIT 1) s ON true
+        LEFT JOIN direct_packet d ON d.packet_hash = p.hash
+        LEFT JOIN anon_request q ON q.packet_hash = p.hash
+        LEFT JOIN channel_message m ON m.packet_hash = p.hash
+        ORDER BY p.first_seen DESC LIMIT 150""", args).fetchall()
+    return {
+        "source": source, "target": target, "days": days,
+        "kinds": [{"type": t, "packets": n} for t, n in kinds],
+        "packets": [dict(zip(("at", "type", "sender", "addressee", "path", "receptions"), r)) for r in rows],
+    }
+
+
 def load_node(conn: psycopg.Connection, node_id: str) -> dict:
     row = conn.execute(
         "SELECT name, node_role_name(role), lat, lon, first_seen, last_seen, advert_count FROM node WHERE pubkey = %s",
@@ -122,6 +167,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "days must be a number"}, 400)
                 with connect() as conn:
                     return self._json(load_graph(conn, days) if url.path == "/api/graph" else load_talk(conn, days))
+            if url.path == "/api/link":
+                source, target = query.get("source", [""])[0], query.get("target", [""])[0]
+                try:
+                    days = min(MAX_DAYS, max(1, int(query.get("days", ["7"])[0])))
+                except ValueError:
+                    return self._json({"error": "days must be a number"}, 400)
+                if not source or not target or max(len(source), len(target)) > 80:
+                    return self._json({"error": "source and target are required"}, 400)
+                with connect() as conn:
+                    return self._json(load_link(conn, source, target, days))
             if url.path == "/api/node":
                 node_id = query.get("id", [""])[0]
                 if not node_id or len(node_id) > 80:

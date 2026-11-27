@@ -126,3 +126,13 @@ input[type=range] { accent-color: var(--adverts); }
   #panel .legend { display: none; }
   #card { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 50%; }
 }
+
+/* link card */
+.kinds-table tr.ktype { cursor: pointer; }
+.kinds-table tr.ktype:hover td { background: rgba(255, 255, 255, 0.04); }
+.kinds-table tr.ktype.sel td { background: rgba(91, 156, 255, 0.14); }
+.kinds-table td:first-child { width: 14px; padding-top: 6px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+#card td.when { white-space: nowrap; color: var(--muted); padding-right: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+#card .meta.path { font-size: 11.5px; }
+#card h2 .link { text-decoration: none; }

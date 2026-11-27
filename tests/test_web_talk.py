@@ -19,6 +19,7 @@ def test_private_messages_link_two_phones_placed_at_their_home_repeater():
     (link,) = out["links"]
     assert (link["a"], link["b"]) == (PHONE_A, PHONE_B)
     assert link["messages"] == 3 and link["service"] == 0 and (link["a_to_b"], link["b_to_a"]) == (2, 1)
+    assert [i[:3] for i in link["items"]] == [[9, 2, True], [5, 2, False], [1, 2, True]]
     assert not link["uncertain"]
     nodes = {n["id"]: n for n in out["nodes"]}
     assert nodes[PHONE_A]["placed"] == "home" and nodes[PHONE_A]["home"] == "Hill"
@@ -58,6 +59,8 @@ def test_channel_mentions_and_quick_replies_against_chance():
     # Anna is a known node by name; Carl is only a name. 1 mention + 3 quick replies (far above chance).
     assert {link["a"], link["b"]} == {PHONE_A, "@Carl"}
     assert link["channel"] == 4 and link["channels"] == ["#t"]
+    # Each exchange is kept: the mention at 20 s is also a quick reply, so 3 distinct moments.
+    assert sorted(i[0] for i in link["items"]) == [20, 5030, 9040] and all(i[1] == "channel" for i in link["items"])
     carl = {n["id"]: n for n in out["nodes"]}["@Carl"]
     assert carl["kind"] == "person" and carl["placed"] == "home"
 

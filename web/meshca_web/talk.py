@@ -63,6 +63,7 @@ class Link:
     last: float = 0.0
     channels: set[str] = field(default_factory=set)
     uncertain: bool = False
+    items: list[tuple] = field(default_factory=list)    # (time, packet type or "channel", from a to b, channel)
 
 
 def _has_coords(n: Node | None) -> bool:
@@ -127,6 +128,7 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
         l.a_to_b += forward
         l.b_to_a += not forward
         l.last = max(l.last, p.at)
+        l.items.append((p.at, p.kind, forward, None))
         l.uncertain = l.uncertain or not (src_ok and dst_ok)
         if p.first_hop:
             homes[src][p.first_hop] += 1
@@ -147,15 +149,19 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
         quick: Counter = Counter()
         count: Counter = Counter(m.sender for m in items)
         last: dict[tuple[str, str], float] = {}
+        said: dict[tuple[str, str], list[float]] = defaultdict(list)       # times of mentions
+        replied: dict[tuple[str, str], list[float]] = defaultdict(list)    # times of quick replies
         for m in items:
             for name in set(x.strip() for x in MENTION.findall(m.text or "")):
                 if name and name != m.sender:
                     mentions[m.sender, name] += 1
                     last[m.sender, name] = m.at
+                    said[m.sender, name].append(m.at)
         for prev, m in zip(items, items[1:]):
             if m.sender != prev.sender and m.at - prev.at <= QUICK_S:
                 quick[m.sender, prev.sender] += 1
                 last[m.sender, prev.sender] = m.at
+                replied[m.sender, prev.sender].append(m.at)
         span = items[-1].at - items[0].at if len(items) > 1 else 0.0
         for pair in set(mentions) | set(quick):
             source, target = pair
@@ -173,6 +179,8 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
             l.b_to_a += 0 if forward else n
             l.channels.add(channel)
             l.last = max(l.last, last[pair])
+            times = set(said[pair]) | (set(replied[pair]) if significant_quick else set())
+            l.items.extend((t, "channel", forward, channel) for t in sorted(times))
 
     # --- places ---
     ids = sorted({l.a for l in links.values()} | {l.b for l in links.values()})
@@ -202,7 +210,9 @@ def build(direct: list[DirectPacket], messages: list[ChannelMessage], nodes: dic
         "nodes": out_nodes,
         "links": [{"a": l.a, "b": l.b, "messages": l.messages, "service": l.service, "channel": l.channel,
                    "a_to_b": l.a_to_b, "b_to_a": l.b_to_a, "last": l.last, "channels": sorted(l.channels),
-                   "uncertain": l.uncertain} for l in sorted(links.values(), key=lambda l: (l.a, l.b))],
+                   "uncertain": l.uncertain,
+                   "items": [list(i) for i in sorted(l.items, key=lambda i: -i[0])[:150]]}
+                  for l in sorted(links.values(), key=lambda l: (l.a, l.b))],
         "unplaced": sum(1 for e in out_nodes if e["lat"] is None),
     }
 
