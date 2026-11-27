@@ -288,31 +288,117 @@ function showTip(html, x, y) {
   tip.style.left = Math.min(window.innerWidth - w - 8, x + 14) + "px";
   tip.style.top = Math.min(window.innerHeight - h - 8, y + 14) + "px";
 }
-function nodeTip(n) {
-  const lines = [`<b>${esc(n.label)}</b>${n.role ? ` · ${esc(n.role)}` : ""}`];
-  if (state.mode === "path") {
-    if (n.kind === "observer") lines.push(`принял ${fmt(n.heard)} пакетов`);
-    else lines.push(`услышал и передал дальше ${fmt(n.relayed)} пакетов`);
-    if (n.gate) lines.push(`<span style="color:${OBS}">через него пакеты попадают к нашему observer'у</span>`);
-    if (n.critical.length) lines.push(`<span style="color:${CRIT}">без него не дойдут: ${n.critical.length}</span>`);
-  } else {
-    lines.push(`обменов: ${fmt(n.size)}`);
-    if (n.placed === "home") lines.push(`<i>место примерное: у ретранслятора ${esc(n.home)}</i>`);
-  }
-  lines.push(mixLine(n.mix));
-  if (state.mode === "path" && n.approx) lines.push("<i>место примерное: среди соседей</i>");
-  return lines.join("<br>");
+const ROLE_TEXT = {
+  "ретранслятор": "Ретранслятор: принимает пакеты в эфире и передаёт их дальше, чтобы они дошли до тех, кого отправитель не слышит напрямую.",
+  "клиент": "Устройство человека: телефон с приложением MeshCore или рация. С него пишут сообщения.",
+  "сервер комнат": "Комната: общий чат на отдельном узле, хранит сообщения для тех, кто подключится позже.",
+  "датчик": "Датчик: узел, который сам по себе передаёт показания.",
+};
+const KIND_TEXT = {
+  adverts: "узел сообщает всем о себе",
+  channel: "сообщения в общих чатах",
+  direct: "переписка людей",
+  service: "приложение опрашивает узел, команды",
+};
+const plural = (n, one, few, many) => {
+  const a = Math.abs(n) % 100, b = a % 10;
+  return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many;
+};
+const packetsWord = (n) => `${fmt(n)} ${plural(n, "пакет", "пакета", "пакетов")}`;
+const periodText = () => ({ 1: "за сутки", 7: "за 7 дней", 30: "за 30 дней" }[document.getElementById("days").value]);
+
+function mixTable(mix) {
+  const total = Object.values(mix).reduce((s, v) => s + (v || 0), 0);
+  if (!total) return "";
+  return `<div class="mix">${Object.keys(KIND_NAMES).filter((k) => mix[k]).map((k) =>
+    `<i style="background:${COLOURS[k]}"></i><span>${KIND_NAMES[k]} <span style="color:var(--muted)">— ${KIND_TEXT[k]}</span></span>` +
+    `<span class="v">${fmt(mix[k])}</span><span class="pc">${Math.round((100 * mix[k]) / total)}%</span>`).join("")}</div>`;
 }
+function whoIs(n) {
+  if (n.kind === "observer") return "Наш observer: приёмник, который слушает эфир и записывает всё, что слышит. Все данные этой карты — то, что услышал он.";
+  if (n.kind === "unknown") return `Узел не определён: в пакетах видны только первые символы его ключа (${esc(n.label.replace("? ", ""))}), а под них подходит несколько узлов или ни одного известного.`;
+  if (n.kind === "person") return "Известен только по имени, которое стоит в его сообщениях в каналах: своё объявление этот узел нам не присылал.";
+  return ROLE_TEXT[n.role] || "Узел сети MeshCore.";
+}
+
+function nodeTip(n) {
+  let h = `<div class="t">${esc(n.label)}</div><div class="k">${esc(n.role || { observer: "наш observer", unknown: "не определён", person: "известен по имени" }[n.kind] || "")}</div>`;
+  h += `<p>${whoIs(n)}</p>`;
+  if (state.mode === "path") {
+    if (n.kind === "observer") {
+      h += `<div class="num">Принял <b>${packetsWord(n.heard)}</b> ${periodText()}</div>`;
+    } else {
+      h += `<div class="num">Передал дальше <b>${packetsWord(n.relayed)}</b> ${periodText()}</div>` +
+           `<p>Это чужие пакеты, которые прошли через него по пути к нам. Чем больше кружок, тем больше он передал.</p>`;
+    }
+    h += mixTable(n.mix);
+    if (n.gate) h += `<div class="badge gate"><b>Через него пакеты попадают к нам.</b> Observer слышит сеть через этот ретранслятор, поэтому к нему сходятся стрелки со всей сети: он несёт к нам чужие пакеты, а не получает свои.</div>`;
+    if (n.critical.length) {
+      const names = n.critical.slice(0, 4).map(esc).join(", ") + (n.critical.length > 4 ? ` и ещё ${n.critical.length - 4}` : "");
+      h += `<div class="badge crit"><b>Критичный узел.</b> Все пакеты этих отправителей идут через него; если он выключится, они перестанут до нас доходить: ${names}.</div>`;
+    }
+    if (n.approx) h += `<div class="badge note"><b>Место примерное.</b> Координат в его объявлении нет, поэтому он поставлен среди своих соседей.</div>`;
+  } else {
+    const partners = neighboursOfAll(n.id);
+    h += `<div class="num"><b>${fmt(n.size)}</b> ${plural(n.size, "обмен", "обмена", "обменов")} с ${fmt(partners)} ${plural(partners, "собеседником", "собеседниками", "собеседниками")} ${periodText()}</div>`;
+    h += mixTable(n.mix);
+    if (n.placed === "home") h += `<div class="badge note"><b>Место примерное.</b> Своих координат нет. Поставлен у ретранслятора ${esc(n.home)}: через него его пакеты входят в сеть, значит, он где-то рядом.</div>`;
+  }
+  return h + `<div class="foot">Нажмите на кружок — подробности справа</div>`;
+}
+
+function neighboursOfAll(id) {
+  const out = new Set();
+  for (const e of state.data.edges) { if (e.source === id) out.add(e.target); if (e.target === id) out.add(e.source); }
+  return out.size;
+}
+
 function edgeTip(e) {
   const s = state.nodes.get(e.source), t = state.nodes.get(e.target);
   if (state.mode === "path") {
-    return `<b>${esc(t.label)}</b> услышал от <b>${esc(s.label)}</b> и передал дальше<br>${fmt(e.packets)} пакетов: ${mixLine(e.mix)}`;
+    let h = `<div class="t">${esc(s.label)} → ${esc(t.label)}</div><div class="k">участок пути пакетов к нашему observer'у</div>`;
+    h += `<div class="num"><b>${esc(t.label)}</b> услышал от <b>${esc(s.label)}</b> и передал дальше <b>${packetsWord(e.packets)}</b> ${periodText()}</div>`;
+    h += mixTable(e.mix);
+    h += `<p>Это дорога, по которой пакеты шли к нам, а не адресат: пакеты могли быть для кого угодно. Кто кому пишет — во втором режиме.</p>`;
+    if (e.uncertain) h += `<div class="badge note"><b>Пунктир:</b> один из узлов не определён или стоит на карте примерно.</div>`;
+    return h;
   }
-  const dir = `${esc(s.label)} → ${esc(t.label)}: ${fmt(e.a_to_b)}<br>${esc(t.label)} → ${esc(s.label)}: ${fmt(e.b_to_a)}`;
-  return `<b>${esc(s.label)}</b> ↔ <b>${esc(t.label)}</b><br>${mixLine(e.mix)}<br>${dir}` +
-    (e.channels.length ? `<br>в каналах: ${e.channels.map(esc).join(", ")}` : "") +
-    `<br>последний раз: ${when(e.last)}` + (e.uncertain ? "<br><i>собеседник определён неуверенно</i>" : "");
+  let h = `<div class="t">${esc(s.label)} ↔ ${esc(t.label)}</div><div class="k">обмен ${periodText()}, последний раз ${when(e.last)}</div><ul>`;
+  if (e.mix.direct) h += `<li><b style="color:${COLOURS.direct}">${fmt(e.mix.direct)}</b> ${plural(e.mix.direct, "личное сообщение", "личных сообщения", "личных сообщений")} — переписка двух людей</li>`;
+  if (e.mix.service) h += `<li><b style="color:${COLOURS.service}">${fmt(e.mix.service)}</b> ${plural(e.mix.service, "служебный пакет", "служебных пакета", "служебных пакетов")} — приложение одного опрашивает другого (вход, состояние, телеметрия) или отдаёт ему команды</li>`;
+  if (e.mix.channel) h += `<li><b style="color:${COLOURS.channel}">${fmt(e.mix.channel)}</b> ${plural(e.mix.channel, "ответ", "ответа", "ответов")} друг другу в каналах ${e.channels.map(esc).join(", ")}: обращение @[имя] или ответ сразу после сообщения другого</li>`;
+  h += `</ul><div class="num">${esc(s.label)} → ${esc(t.label)}: <b>${fmt(e.a_to_b)}</b> &nbsp;·&nbsp; ${esc(t.label)} → ${esc(s.label)}: <b>${fmt(e.b_to_a)}</b></div>`;
+  if (e.uncertain) h += `<div class="badge note"><b>Пунктир: собеседник определён неуверенно.</b> В личных пакетах видны только первые два символа ключа, и по ним нельзя точно сказать, кто это.</div>`;
+  return h;
 }
+
+// ---------- help for the controls ----------
+const HELP = {
+  "mode-path": `<div class="t">Как пакеты доходят до нас</div><p>Дорога пакетов по сети к нашему observer'у: кто от кого их услышал и передал дальше.</p><p>Отвечает на вопросы: кто больше всех носит пакеты, какие связи главные, на ком держится связь с дальними частями сети.</p>`,
+  "mode-talk": `<div class="t">Кто с кем общается</div><p>Линия соединяет того, кто отправил, и того, кому было адресовано, — каким бы путём ни шли пакеты.</p><p>Видно: кто с кем переписывается, кто чей ретранслятор опрашивает, кто кому отвечает в каналах.</p>`,
+  days: `<div class="t">Период</div><p>За сколько последних дней собраны данные на карте. Расчёт обновляется раз в час.</p>`,
+  adverts: `<div class="t" style="color:${COLOURS.adverts}">Объявления</div><p>Узел время от времени сообщает всей сети о себе: «я есть», своё имя, роль и координаты. Так приложения узнают о соседях.</p><p>Это самый частый вид фона в сети.</p>`,
+  channel: `<div class="t" style="color:${COLOURS.channel}">Каналы</div><p>Сообщения в общих чатах: Public, #test и другие. Их получают все, кто подписан на канал.</p><p>В режиме «Кто с кем» — ответы людей друг другу в этих чатах.</p>`,
+  direct: `<div class="t" style="color:${COLOURS.direct}">Личные сообщения</div><p>Переписка от человека к человеку и подтверждения, что сообщение доставлено.</p><p>Сами тексты зашифрованы и нам не видны — только факт обмена.</p>`,
+  service: `<div class="t" style="color:${COLOURS.service}">Служебные</div><p>Пакеты, которые шлют приложения, а не люди:</p><ul><li>вход на ретранслятор или в комнату, в том числе анонимный;</li><li>запросы состояния и телеметрии и ответы на них;</li><li>команды удалённого управления ретранслятором;</li><li>сообщённый обратный путь: узел говорит отправителю, каким путём ему отвечать.</li></ul>`,
+  min: `<div class="t">Порог</div><p>Связи, по которым прошло меньше указанного числа, скрыты, чтобы карта не превращалась в паутину. Сдвиньте влево — увидите всё, вправо — только главные связи.</p>`,
+  risks: `<div class="t" style="color:${CRIT}">Только узлы, без которых кто-то пропадёт</div><p>Оставляет на карте только критичные узлы и их связи.</p><p>Критичный узел — тот, через который до нас идут <b>все</b> пакеты какого-то отправителя. Если он выключится, этот отправитель перестанет до нас доходить.</p><p>Так видно, на ком держится связь с дальними частями сети и где не хватает обходных путей.</p>`,
+  stats: `<div class="t">Что сейчас на карте</div><p>Сколько узлов и связей показано с учётом фильтров и сколько всего есть за период.</p><p>«Не на карте» — узлы, место которых неизвестно: нет ни своих координат, ни соседей с координатами.</p>`,
+};
+let helpEl = null;
+document.addEventListener("mouseover", (ev) => {
+  const el = ev.target.closest("[data-help]");
+  if (el === helpEl) return;
+  helpEl = el;
+  if (!el) { if (!state.hover) tip.hidden = true; return; }
+  const r = el.getBoundingClientRect(), panel = document.getElementById("panel").getBoundingClientRect();
+  showTip(HELP[el.dataset.help] || "", Math.max(r.right, panel.right) - 4, r.top - 14);
+});
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest(".help");          // on touch screens a tap on "?" shows the same text
+  if (el) { ev.preventDefault(); const r = el.getBoundingClientRect(); showTip(HELP[el.dataset.help], r.right, r.bottom); }
+});
+
 map.on("mousemove", (ev) => {
   if (state.hover) return;
   const e = edgeLayer.edgeAt(ev.containerPoint);

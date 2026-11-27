@@ -12,13 +12,13 @@
 
 <aside id="panel">
   <div class="modes" role="tablist">
-    <button data-mode="path" class="on" role="tab">Как пакеты доходят до нас</button>
-    <button data-mode="talk" role="tab">Кто с кем общается</button>
+    <button data-mode="path" class="on" role="tab" data-help="mode-path">Как пакеты доходят до нас</button>
+    <button data-mode="talk" role="tab" data-help="mode-talk">Кто с кем общается</button>
   </div>
   <p id="modeText" class="sub"></p>
 
   <section class="controls">
-    <label class="row"><span>Период</span>
+    <label class="row"><span>Период <i class="help" data-help="days">?</i></span>
       <select id="days">
         <option value="1">сутки</option>
         <option value="7" selected>7 дней</option>
@@ -26,18 +26,18 @@
       </select>
     </label>
     <div class="row kinds">
-      <label data-modes="path" title="Узел сообщает всем: «я есть», имя, роль, координаты"><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
-      <label title="Сообщения в общих чатах: Public, #test и другие"><input type="checkbox" data-kind="channel" checked><i class="sw channel"></i>каналы</label>
-      <label title="Сообщения от человека к человеку и подтверждения их доставки"><input type="checkbox" data-kind="direct" checked><i class="sw direct"></i>личные сообщения</label>
-      <label title="Приложение опрашивает ретранслятор или комнату: вход, состояние, телеметрия, команды, ответы; сообщённый обратный путь"><input type="checkbox" data-kind="service" checked><i class="sw service"></i>служебные</label>
+      <label data-modes="path" data-help="adverts"><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
+      <label data-help="channel"><input type="checkbox" data-kind="channel" checked><i class="sw channel"></i>каналы</label>
+      <label data-help="direct"><input type="checkbox" data-kind="direct" checked><i class="sw direct"></i>личные сообщения</label>
+      <label data-help="service"><input type="checkbox" data-kind="service" checked><i class="sw service"></i>служебные</label>
     </div>
-    <label class="row"><span>Показывать связи от <output id="minOut">5</output> <span id="minUnit">пакетов</span></span>
+    <label class="row"><span>Показывать связи от <output id="minOut">5</output> <span id="minUnit">пакетов</span> <i class="help" data-help="min">?</i></span>
       <input type="range" id="min" min="0" max="100" value="35">
     </label>
-    <label class="row toggle" data-modes="path" title="Оставить только критичные узлы и их связи"><input type="checkbox" id="risks"> только узлы, без которых кто-то пропадёт</label>
+    <label class="row toggle" data-modes="path" data-help="risks"><input type="checkbox" id="risks"> только узлы, без которых кто-то пропадёт <i class="help" data-help="risks">?</i></label>
   </section>
 
-  <section id="stats" class="stats"></section>
+  <section id="stats" class="stats" data-help="stats"></section>
 
   <details class="legend" open>
     <summary>Как читать</summary>
