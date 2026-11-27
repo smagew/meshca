@@ -1,19 +1,57 @@
-/* meshca · map of links. Edges are drawn on one canvas under the node markers; nodes are Leaflet markers with
-   pie-chart icons. Everything is computed from /api/graph; /api/node adds what the directory knows about a node. */
+/* meshca · map. Two modes over the same drawing:
+   path — how packets travel to our observer (/api/graph): an arrow A -> B means B heard the packet from A and passed it on;
+   talk — who talks to whom (/api/talk): a line joins the sender and the addressee, whatever way the packets went.
+   Links are drawn on one canvas under the node markers; nodes are Leaflet markers with pie-chart icons. */
 "use strict";
 
 const COLOURS = { adverts: "#5b9cff", channel: "#5fd38d", direct: "#ffa24c", service: "#a9b3bf" };
 const KIND_NAMES = { adverts: "объявления", channel: "каналы", direct: "личные сообщения", service: "служебные" };
 const CRIT = "#ff4d5e", OBS = "#b980ff", UNKNOWN = "#8b95a3";
 
+const MODES = {
+  path: {
+    text: "Как пакеты со всей сети доходят до нашего observer'а. Стрелка A → B: узел B услышал пакет от A и передал " +
+          "его дальше. Кому был адресован сам пакет, здесь не показано — для этого второй режим.",
+    unit: "пакетов",
+    legend: `<ul>
+      <li><b>Стрелка A → B</b> — B услышал пакеты от A и передал их дальше, к нам. Толще — больше пакетов.
+        Цвет — каких больше: <b style="color:var(--adverts)">объявления</b>, <b style="color:var(--channel)">каналы</b>,
+        <b style="color:var(--direct)">личные сообщения</b>, <b style="color:var(--service)">служебные</b>.</li>
+      <li><b>Кружок</b> — узел. Размер — сколько чужих пакетов он передал дальше, доли цвета — каких.</li>
+      <li><b class="gate">Фиолетовое кольцо</b> — ретранслятор, через который пакеты попадают к нашему observer'у.
+        Поэтому к нему сходятся стрелки со всей сети: это не пакеты для него, а пакеты, которые он несёт к нам.</li>
+      <li><b class="obs">Фиолетовая точка</b> — наш observer.</li>
+      <li><b class="crit">Красное кольцо</b> — через этот узел идут все пакеты какого-то отправителя: без него
+        отправитель перестанет до нас доходить.</li>
+      <li><b>Пунктир</b> — узел не определён (известно только начало ключа) или его место примерное.</li>
+    </ul>`,
+  },
+  talk: {
+    text: "Кто кому пишет и кого опрашивает. Линия соединяет отправителя и получателя, каким бы путём ни шли пакеты. " +
+          "Видны только разговоры, пакеты которых дошли до нашего observer'а.",
+    unit: "сообщений",
+    legend: `<ul>
+      <li><b>Линия</b> — эти двое обменивались пакетами. Толще — чаще. Цвет — чем:
+        <b style="color:var(--direct)">личные сообщения</b> — переписка людей;
+        <b style="color:var(--service)">служебные</b> — приложение опрашивает ретранслятор или комнату, команды ей;
+        <b style="color:var(--channel)">каналы</b> — ответы друг другу в общем чате (обращение @[имя] или быстрый ответ).</li>
+      <li><b>Кружок</b> — устройство. Размер — сколько всего обменов. Телефоны обычно не сообщают координаты: они
+        стоят у своего «домашнего» ретранслятора — того, через который их пакеты входят в сеть
+        (кружок с <b>пунктирной</b> обводкой). Это район, а не точное место.</li>
+      <li><b>Пунктирная линия</b> — один из собеседников определён неуверенно: в личных пакетах видны только
+        первые два символа ключа.</li>
+    </ul>`,
+  },
+};
+
 const state = {
-  data: null, nodes: new Map(), markers: new Map(),
-  kinds: new Set(["adverts", "channel", "direct", "service"]), min: 5, risks: false,
+  mode: "path", raw: {}, data: null, nodes: new Map(), markers: new Map(),
+  kinds: new Set(Object.keys(KIND_NAMES)), min: 5, risks: false,
   hover: null, selected: null, visibleEdges: [], visibleNodes: new Set(),
 };
 
 // ---------- map ----------
-const map = L.map("map", { zoomControl: false, preferCanvas: false, worldCopyJump: false, minZoom: 2, maxZoom: 16 })
+const map = L.map("map", { zoomControl: false, minZoom: 2, maxZoom: 16 })
   .setView([20, 0], 3);   // replaced by the extent of the nodes once the data arrives
 L.control.zoom({ position: "bottomright" }).addTo(map);
 // OpenStreetMap's own tiles, darkened in CSS (class "base") so the coloured links stand out.
@@ -26,12 +64,39 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const fmt = (n) => Number(n || 0).toLocaleString("ru-RU");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const minFromSlider = (v) => (v <= 0 ? 1 : Math.max(1, Math.round(Math.pow(10, (v / 100) * 3))));
-const dominant = (mix) => Object.keys(KIND_NAMES).reduce((a, b) => ((mix[b] || 0) > (mix[a] || 0) ? b : a), "adverts");
-// The observer is drawn small: it stands where its neighbours are and must not hide them.
-const nodeRadius = (n) => (n.kind === "observer" ? 9 : Math.min(30, 5 + 1.9 * Math.pow(Math.max(n.relayed, 1), 0.36)));
-function shown(mix) { return [...state.kinds].reduce((s, k) => s + (mix[k] || 0), 0); }
+const dominant = (mix) => Object.keys(mix).reduce((a, b) => ((mix[b] || 0) > (mix[a] || 0) ? b : a));
+const shown = (mix) => [...state.kinds].reduce((s, k) => s + (mix[k] || 0), 0);
+const when = (t) => new Date(t * 1000).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const nodeRadius = (n) => (n.kind === "observer" ? 9 : Math.min(30, 5 + 1.9 * Math.pow(Math.max(n.size, 1), 0.36)));
+function mixLine(mix) {
+  return Object.keys(KIND_NAMES).filter((k) => mix[k]).map((k) => `<span style="color:${COLOURS[k]}">${KIND_NAMES[k]} ${fmt(mix[k])}</span>`).join(" · ");
+}
 
-// ---------- edge canvas layer ----------
+// ---------- both modes become one shape: nodes {id, label, kind, lat, lon, approx, size, mix, ...}, edges {source, target, mix, ...} ----------
+function fromPath(d) {
+  const gates = new Set(d.edges.filter((e) => e.target === "@observer").map((e) => e.source));
+  const nodes = d.nodes.map((n) => ({ ...n, size: n.kind === "observer" ? n.heard : n.relayed, approx: n.placed === "neighbours", gate: gates.has(n.id) }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = d.edges.map((e) => {
+    const s = byId.get(e.source), t = byId.get(e.target);
+    return { ...e, uncertain: s.kind === "unknown" || t.kind === "unknown" || s.approx || t.approx };
+  });
+  return { nodes, edges, arrows: true, unplaced: d.unplaced, computed_at: d.computed_at };
+}
+function fromTalk(d) {
+  const mixOf = (l) => ({ direct: l.messages, service: l.service, channel: l.channel });
+  const total = new Map();
+  for (const l of d.links) for (const id of [l.a, l.b]) {
+    const m = total.get(id) || { direct: 0, service: 0, channel: 0 };
+    const x = mixOf(l); for (const k in x) m[k] += x[k];
+    total.set(id, m);
+  }
+  const nodes = d.nodes.map((n) => ({ ...n, size: n.total, mix: total.get(n.id) || {}, critical: [], approx: n.placed === "home" }));
+  const edges = d.links.map((l) => ({ ...l, source: l.a, target: l.b, mix: mixOf(l), packets: l.messages + l.service + l.channel }));
+  return { nodes, edges, arrows: false, unplaced: d.unplaced };
+}
+
+// ---------- link canvas ----------
 const EdgeLayer = L.Layer.extend({
   onAdd(m) {
     this._canvas = L.DomUtil.create("canvas", "edge-canvas");
@@ -44,31 +109,30 @@ const EdgeLayer = L.Layer.extend({
   },
   onRemove(m) { this._canvas.remove(); m.off("moveend zoomend resize viewreset", this.redraw, this); },
   redraw() {
-    const m = this._map; if (!m) return;
+    const m = this._map; if (!m || !state.data) return;
     const size = m.getSize(), ratio = window.devicePixelRatio || 1, c = this._canvas;
     L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
     c.width = size.x * ratio; c.height = size.y * ratio; c.style.width = size.x + "px"; c.style.height = size.y + "px";
     const ctx = c.getContext("2d"); ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, size.x, size.y);
     this.geometry = [];
-    const focus = state.hover || state.selected;
-    // Thin first, so thick links stay on top.
-    const edges = [...state.visibleEdges].sort((a, b) => shown(a.mix) - shown(b.mix));
+    const focus = state.hover || state.selected, arrows = state.data.arrows;
+    const edges = [...state.visibleEdges].sort((a, b) => shown(a.mix) - shown(b.mix));   // thick ones on top
     for (const e of edges) {
       const s = state.nodes.get(e.source), t = state.nodes.get(e.target);
       if (!s || !t || s.lat == null || t.lat == null) continue;
       const p0 = m.latLngToContainerPoint([s.lat, s.lon]), p1 = m.latLngToContainerPoint([t.lat, t.lon]);
-      const g = curve(p0, p1, nodeRadius(s) + 2, nodeRadius(t) + 4);
+      const g = curve(p0, p1, nodeRadius(s) + 2, nodeRadius(t) + (arrows ? 4 : 2), arrows ? 0.16 : 0.08);
       if (!g) continue;
       const packets = shown(e.mix), width = Math.min(11, 0.8 + 1.25 * Math.log(1 + packets));
       const lit = !focus || e.source === focus || e.target === focus;
-      const uncertain = s.kind === "unknown" || t.kind === "unknown" || s.placed === "neighbours" || t.placed === "neighbours";
-      ctx.globalAlpha = lit ? (focus ? 0.95 : 0.72) : 0.06;
-      ctx.strokeStyle = ctx.fillStyle = COLOURS[dominant(e.mix)];
+      const mix = {}; for (const k of state.kinds) mix[k] = e.mix[k] || 0;
+      ctx.globalAlpha = lit ? (focus ? 0.95 : 0.75) : 0.06;
+      ctx.strokeStyle = ctx.fillStyle = COLOURS[dominant(mix)];
       ctx.lineWidth = width; ctx.lineCap = "round";
-      ctx.setLineDash(uncertain ? [Math.max(4, width * 1.6), Math.max(4, width * 1.4)] : []);
+      ctx.setLineDash(e.uncertain ? [Math.max(4, width * 1.6), Math.max(4, width * 1.4)] : []);
       ctx.beginPath(); ctx.moveTo(g.a.x, g.a.y); ctx.quadraticCurveTo(g.c.x, g.c.y, g.b.x, g.b.y); ctx.stroke();
       ctx.setLineDash([]);
-      arrow(ctx, g, width);
+      if (arrows) arrow(ctx, g, width);
       this.geometry.push({ e, pts: sample(g, 16), width });
     }
     ctx.globalAlpha = 1;
@@ -84,12 +148,11 @@ const EdgeLayer = L.Layer.extend({
     return best;
   },
 });
-
-function curve(p0, p1, r0, r1) {
+function curve(p0, p1, r0, r1, bendShare) {
   const dx = p1.x - p0.x, dy = p1.y - p0.y, len = Math.hypot(dx, dy);
   if (len < r0 + r1 + 4) return null;
-  // Bend to the left of the direction: A->B and B->A take opposite sides and never overlap.
-  const nx = -dy / len, ny = dx / len, bend = Math.min(60, len * 0.16);
+  // Bend to the left of the direction: A -> B and B -> A take opposite sides and never overlap.
+  const nx = -dy / len, ny = dx / len, bend = Math.min(60, len * bendShare);
   const c = { x: (p0.x + p1.x) / 2 + nx * bend, y: (p0.y + p1.y) / 2 + ny * bend };
   const trim = (p, q, r) => { const l = Math.hypot(q.x - p.x, q.y - p.y); return { x: p.x + ((q.x - p.x) * r) / l, y: p.y + ((q.y - p.y) * r) / l }; };
   return { a: trim(p0, c, r0), b: trim(p1, c, r1), c };
@@ -112,19 +175,18 @@ function segDist(p, a, b) {
   const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
-
 const edgeLayer = new EdgeLayer().addTo(map);
 
 // ---------- node icons ----------
 function pie(n) {
-  const r = nodeRadius(n), size = 2 * r + 10, c = size / 2;
+  const r = nodeRadius(n), size = 2 * r + 16, c = size / 2;
   let body;
   if (n.kind === "observer") {
-    body = `<circle cx="${c}" cy="${c}" r="${r}" fill="${OBS}" fill-opacity="0.9"/>`;
+    body = `<circle cx="${c}" cy="${c}" r="${r}" fill="${OBS}"/>`;
   } else {
     const parts = Object.keys(KIND_NAMES).map((k) => [k, n.mix[k] || 0]).filter(([, v]) => v > 0);
     const total = parts.reduce((s, [, v]) => s + v, 0);
-    if (!total) body = `<circle cx="${c}" cy="${c}" r="${r}" fill="${UNKNOWN}" fill-opacity="0.55"/>`;
+    if (!total) body = `<circle cx="${c}" cy="${c}" r="${r}" fill="${UNKNOWN}" fill-opacity="0.6"/>`;
     else if (parts.length === 1) body = `<circle cx="${c}" cy="${c}" r="${r}" fill="${COLOURS[parts[0][0]]}"/>`;
     else {
       let a0 = -Math.PI / 2; body = "";
@@ -135,55 +197,30 @@ function pie(n) {
       }
     }
   }
-  const dashed = n.kind === "unknown" || n.placed === "neighbours";
-  const ring = n.critical.length
-    ? `<circle cx="${c}" cy="${c}" r="${r + 3}" fill="none" stroke="${CRIT}" stroke-width="3"/>`
-    : `<circle cx="${c}" cy="${c}" r="${r + 0.5}" fill="none" stroke="#0b0d10" stroke-width="1.5" ${dashed ? 'stroke-dasharray="3 2" stroke="#cfd6df"' : ""}/>`;
-  return L.divIcon({ className: "node-icon", iconSize: [size, size], iconAnchor: [c, c], html: `<svg width="${size}" height="${size}">${body}${ring}</svg>` });
+  const dashed = n.kind === "unknown" || n.approx;
+  let rings = `<circle cx="${c}" cy="${c}" r="${r + 0.5}" fill="none" stroke="${dashed ? "#cfd6df" : "#0b0d10"}" stroke-width="1.5"${dashed ? ' stroke-dasharray="3 2"' : ""}/>`;
+  if (n.gate) rings += `<circle cx="${c}" cy="${c}" r="${r + 3}" fill="none" stroke="${OBS}" stroke-width="2.5"/>`;
+  if (n.critical && n.critical.length) rings += `<circle cx="${c}" cy="${c}" r="${r + (n.gate ? 6 : 3)}" fill="none" stroke="${CRIT}" stroke-width="2.5"/>`;
+  return L.divIcon({ className: "node-icon", iconSize: [size, size], iconAnchor: [c, c], html: `<svg width="${size}" height="${size}">${body}${rings}</svg>` });
 }
 
 // ---------- drawing ----------
 function applyFilters() {
   const d = state.data; if (!d) return;
   let edges = d.edges.filter((e) => shown(e.mix) >= state.min);
-  if (state.risks) {
+  if (state.mode === "path" && state.risks) {
     const crit = new Set(d.nodes.filter((n) => n.critical.length).map((n) => n.id));
     edges = edges.filter((e) => crit.has(e.source) || crit.has(e.target));
   }
   state.visibleEdges = edges;
   state.visibleNodes = new Set(edges.flatMap((e) => [e.source, e.target]));
-  if (state.risks) d.nodes.forEach((n) => n.critical.length && state.visibleNodes.add(n.id));
+  if (state.mode === "path" && state.risks) d.nodes.forEach((n) => n.critical.length && state.visibleNodes.add(n.id));
   for (const [id, marker] of state.markers) {
-    const on = state.visibleNodes.has(id) && state.nodes.get(id).lat != null;
+    const on = state.visibleNodes.has(id);
     if (on && !map.hasLayer(marker)) marker.addTo(map);
     if (!on && map.hasLayer(marker)) marker.remove();
   }
-  updateLabels(); edgeLayer.redraw(); updateStats();
-}
-
-function updateLabels() {
-  // Labels go to the most important nodes first and only where they fit: a label that would overlap one already
-  // placed waits for a closer zoom. The focused node and its neighbours are always labelled.
-  const focus = state.hover || state.selected;
-  const must = new Set(focus ? [focus, ...neighboursOf(focus)] : []);
-  const ranked = [...state.visibleNodes].map((id) => state.nodes.get(id))
-    .filter((n) => n && n.lat != null)
-    .sort((a, b) => must.has(b.id) - must.has(a.id) || (b.kind === "observer") - (a.kind === "observer")
-      || b.critical.length - a.critical.length || b.relayed - a.relayed);
-  const boxes = [], keep = new Set();
-  for (const n of ranked) {
-    const p = map.latLngToContainerPoint([n.lat, n.lon]), r = nodeRadius(n);
-    const box = { x0: p.x - r, y0: p.y - Math.max(r, 8), x1: p.x + r + 6 + n.label.length * 6.6, y1: p.y + Math.max(r, 8) };
-    const free = !boxes.some((b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0);
-    if (free || must.has(n.id)) { keep.add(n.id); boxes.push(box); }
-    else boxes.push({ x0: p.x - r, y0: p.y - r, x1: p.x + r, y1: p.y + r });   // its circle still takes room
-  }
-  for (const [id, marker] of state.markers) {
-    const want = keep.has(id) && map.hasLayer(marker);
-    if (want && !marker.getTooltip()) {
-      marker.bindTooltip(esc(state.nodes.get(id).label), { permanent: true, direction: "right", className: "node-label", offset: [nodeRadius(state.nodes.get(id)) + 2, 0] });
-    } else if (!want && marker.getTooltip()) marker.unbindTooltip();
-  }
+  updateLabels(); edgeLayer.redraw(); updateStats(); setFocus();
 }
 
 function neighboursOf(id) {
@@ -192,34 +229,54 @@ function neighboursOf(id) {
   return out;
 }
 
+function updateLabels() {
+  // Labels go to the most important nodes first and only where they fit; the rest appear on a closer zoom.
+  // The focused node and its neighbours are always labelled.
+  const focus = state.hover || state.selected;
+  const must = new Set(focus ? [focus, ...neighboursOf(focus)] : []);
+  const ranked = [...state.visibleNodes].map((id) => state.nodes.get(id))
+    .filter((n) => n && n.lat != null)
+    .sort((a, b) => must.has(b.id) - must.has(a.id) || (b.kind === "observer") - (a.kind === "observer")
+      || (b.critical || []).length - (a.critical || []).length || b.size - a.size);
+  const boxes = [], keep = new Set();
+  for (const n of ranked) {
+    const p = map.latLngToContainerPoint([n.lat, n.lon]), r = nodeRadius(n);
+    const box = { x0: p.x - r, y0: p.y - Math.max(r, 8), x1: p.x + r + 6 + n.label.length * 6.6, y1: p.y + Math.max(r, 8) };
+    const free = !boxes.some((b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0);
+    if (free || must.has(n.id)) { keep.add(n.id); boxes.push(box); }
+    else boxes.push({ x0: p.x - r, y0: p.y - r, x1: p.x + r, y1: p.y + r });
+  }
+  for (const [id, marker] of state.markers) {
+    const want = keep.has(id) && map.hasLayer(marker);
+    if (want && !marker.getTooltip()) {
+      const n = state.nodes.get(id);
+      marker.bindTooltip(esc(n.label), { permanent: true, direction: "right", className: "node-label", offset: [nodeRadius(n) + 4, 0] });
+    } else if (!want && marker.getTooltip()) marker.unbindTooltip();
+  }
+}
+
 function setFocus() {
   const focus = state.hover || state.selected;
   const lit = focus ? neighboursOf(focus) : new Set();
   if (focus) lit.add(focus);
   document.getElementById("map").classList.toggle("dim", !!focus);
+  updateLabels();
   for (const [id, marker] of state.markers) {
     const el = marker.getElement(); if (el) el.classList.toggle("lit", lit.has(id));
-    const tip = marker.getTooltip(); const tel = tip && tip.getElement(); if (tel) tel.classList.toggle("lit", lit.has(id));
-  }
-  updateLabels(); setFocusLabels(lit); edgeLayer.redraw();
-}
-function setFocusLabels(lit) {
-  for (const [id, marker] of state.markers) {
     const tel = marker.getTooltip() && marker.getTooltip().getElement(); if (tel) tel.classList.toggle("lit", lit.has(id));
   }
+  edgeLayer.redraw();
 }
 
 function updateStats() {
-  const d = state.data;
-  const placed = d.nodes.filter((n) => n.lat != null).length;
-  const crit = d.nodes.filter((n) => n.critical.length).length;
-  const packets = state.visibleEdges.reduce((s, e) => s + shown(e.mix), 0);
+  const d = state.data, talk = state.mode === "talk";
+  const amount = state.visibleEdges.reduce((s, e) => s + shown(e.mix), 0);
+  const crit = d.nodes.filter((n) => (n.critical || []).length).length;
   document.getElementById("stats").innerHTML =
-    `На карте <b>${fmt(state.visibleNodes.size)}</b> узлов и <b>${fmt(state.visibleEdges.length)}</b> связей из ${fmt(d.edges.length)}` +
-    ` · <b>${fmt(packets)}</b> прохождений пакетов` +
-    `<br>Критичных узлов: <b style="color:${CRIT}">${crit}</b>` +
-    (d.unplaced ? ` · без места на карте: ${d.unplaced}` : "") +
-    (placed ? "" : "<br>Нет узлов с координатами") +
+    `На карте <b>${fmt(state.visibleNodes.size)}</b> ${talk ? "собеседников" : "узлов"} и <b>${fmt(state.visibleEdges.length)}</b> ` +
+    `${talk ? "пар" : "связей"} из ${fmt(d.edges.length)} · <b>${fmt(amount)}</b> ${talk ? "обменов" : "передач пакетов"}` +
+    (talk ? "" : `<br>Критичных узлов: <b style="color:${CRIT}">${crit}</b>`) +
+    (d.unplaced ? `<br>Не на карте (место неизвестно): ${d.unplaced}` : "") +
     (d.computed_at ? `<br>Расчёт: ${new Date(d.computed_at).toLocaleString("ru-RU")}` : "");
 }
 
@@ -231,52 +288,77 @@ function showTip(html, x, y) {
   tip.style.left = Math.min(window.innerWidth - w - 8, x + 14) + "px";
   tip.style.top = Math.min(window.innerHeight - h - 8, y + 14) + "px";
 }
-function mixLine(mix) {
-  return Object.keys(KIND_NAMES).filter((k) => mix[k]).map((k) => `<span style="color:${COLOURS[k]}">${KIND_NAMES[k]} ${fmt(mix[k])}</span>`).join(" · ");
-}
 function nodeTip(n) {
-  const what = n.kind === "observer" ? `принял ${fmt(n.heard)}` : `передал дальше ${fmt(n.relayed)}`;
-  return `<b>${esc(n.label)}</b>${n.role ? ` · ${esc(n.role)}` : ""}<br>${what} пакетов<br>${mixLine(n.mix)}` +
-    (n.critical.length ? `<br><span style="color:${CRIT}">критичный: без него не дойдут ${n.critical.length}</span>` : "") +
-    (n.placed === "neighbours" ? "<br><i>место примерное: среди соседей</i>" : "");
+  const lines = [`<b>${esc(n.label)}</b>${n.role ? ` · ${esc(n.role)}` : ""}`];
+  if (state.mode === "path") {
+    if (n.kind === "observer") lines.push(`принял ${fmt(n.heard)} пакетов`);
+    else lines.push(`услышал и передал дальше ${fmt(n.relayed)} пакетов`);
+    if (n.gate) lines.push(`<span style="color:${OBS}">через него пакеты попадают к нашему observer'у</span>`);
+    if (n.critical.length) lines.push(`<span style="color:${CRIT}">без него не дойдут: ${n.critical.length}</span>`);
+  } else {
+    lines.push(`обменов: ${fmt(n.size)}`);
+    if (n.placed === "home") lines.push(`<i>место примерное: у ретранслятора ${esc(n.home)}</i>`);
+  }
+  lines.push(mixLine(n.mix));
+  if (state.mode === "path" && n.approx) lines.push("<i>место примерное: среди соседей</i>");
+  return lines.join("<br>");
+}
+function edgeTip(e) {
+  const s = state.nodes.get(e.source), t = state.nodes.get(e.target);
+  if (state.mode === "path") {
+    return `<b>${esc(t.label)}</b> услышал от <b>${esc(s.label)}</b> и передал дальше<br>${fmt(e.packets)} пакетов: ${mixLine(e.mix)}`;
+  }
+  const dir = `${esc(s.label)} → ${esc(t.label)}: ${fmt(e.a_to_b)}<br>${esc(t.label)} → ${esc(s.label)}: ${fmt(e.b_to_a)}`;
+  return `<b>${esc(s.label)}</b> ↔ <b>${esc(t.label)}</b><br>${mixLine(e.mix)}<br>${dir}` +
+    (e.channels.length ? `<br>в каналах: ${e.channels.map(esc).join(", ")}` : "") +
+    `<br>последний раз: ${when(e.last)}` + (e.uncertain ? "<br><i>собеседник определён неуверенно</i>" : "");
 }
 map.on("mousemove", (ev) => {
   if (state.hover) return;
   const e = edgeLayer.edgeAt(ev.containerPoint);
-  if (e) {
-    const s = state.nodes.get(e.source), t = state.nodes.get(e.target);
-    showTip(`<b>${esc(s.label)}</b> → <b>${esc(t.label)}</b><br>${fmt(e.packets)} пакетов<br>${mixLine(e.mix)}`, ev.originalEvent.clientX, ev.originalEvent.clientY);
-    map.getContainer().style.cursor = "pointer";
-  } else { tip.hidden = true; map.getContainer().style.cursor = ""; }
+  if (e) { showTip(edgeTip(e), ev.originalEvent.clientX, ev.originalEvent.clientY); map.getContainer().style.cursor = "pointer"; }
+  else { tip.hidden = true; map.getContainer().style.cursor = ""; }
 });
 map.on("click", (ev) => {
   const e = edgeLayer.edgeAt(ev.containerPoint);
   if (e) select(state.selected === e.source ? e.target : e.source);
-  else if (state.selected) { state.selected = null; document.getElementById("card").hidden = true; setFocus(); }
+  else if (state.selected) closeCard();
 });
-map.on("zoomend", () => { updateLabels(); setFocusLabels(new Set()); setFocus(); });
+map.on("zoomend", setFocus);
 
 // ---------- node card ----------
+function closeCard() { state.selected = null; document.getElementById("card").hidden = true; setFocus(); }
 async function select(id) {
   state.selected = id; setFocus();
   const n = state.nodes.get(id), card = document.getElementById("card"), body = document.getElementById("cardBody");
+  if (!n) return;
   card.hidden = false;
-  const incoming = state.data.edges.filter((e) => e.target === id).sort((a, b) => b.packets - a.packets);
-  const outgoing = state.data.edges.filter((e) => e.source === id).sort((a, b) => b.packets - a.packets);
   const total = Object.values(n.mix).reduce((s, v) => s + v, 0) || 1;
   const bar = `<div class="bar">${Object.keys(KIND_NAMES).map((k) => `<i style="width:${(100 * (n.mix[k] || 0)) / total}%;background:${COLOURS[k]}"></i>`).join("")}</div>`;
-  const rows = (list, key) => list.slice(0, 10).map((e) => {
-    const other = state.nodes.get(e[key]);
-    return `<tr><td class="link" data-id="${esc(e[key])}">${esc(other ? other.label : e[key])}</td><td class="n">${fmt(e.packets)}</td></tr>`;
-  }).join("") + (list.length > 10 ? `<tr><td colspan="2" class="meta">и ещё ${list.length - 10}</td></tr>` : "");
-  body.innerHTML = `<h2>${esc(n.label)}</h2>
-    <div class="meta">${esc(n.role || (n.kind === "unknown" ? "узел не определён: известно только начало ключа" : n.kind === "observer" ? "наш observer" : ""))}</div>
-    <div>${n.kind === "observer" ? `Принял <b>${fmt(n.heard)}</b>` : `Передал дальше <b>${fmt(n.relayed)}</b>`} пакетов</div>
-    ${bar}<div class="meta">${mixLine(n.mix)}</div>
-    ${n.critical.length ? `<h3 class="warn">Критичный узел</h3><div>Без него перестанут доходить до нас (${n.critical.length}): ${n.critical.map(esc).join(", ")}</div>` : ""}
-    ${incoming.length ? `<h3>Получает от</h3><table>${rows(incoming, "source")}</table>` : ""}
-    ${outgoing.length ? `<h3>Передаёт</h3><table>${rows(outgoing, "target")}</table>` : ""}
-    <div id="nodeMore" class="meta"></div>`;
+  const rows = (list, other, value) => list.slice(0, 12).map((e) => {
+    const o = state.nodes.get(e[other]);
+    return `<tr><td class="link" data-id="${esc(e[other])}">${esc(o ? o.label : e[other])}</td><td class="n">${value(e)}</td></tr>`;
+  }).join("") + (list.length > 12 ? `<tr><td colspan="2" class="meta">и ещё ${list.length - 12}</td></tr>` : "");
+  const edges = state.data.edges;
+  let html = `<h2>${esc(n.label)}</h2><div class="meta">${esc(n.role || { unknown: "не определён: известно только начало ключа", observer: "наш observer", person: "известен только по имени в сообщениях" }[n.kind] || "")}</div>`;
+  if (state.mode === "path") {
+    const incoming = edges.filter((e) => e.target === id).sort((a, b) => b.packets - a.packets);
+    const outgoing = edges.filter((e) => e.source === id).sort((a, b) => b.packets - a.packets);
+    html += `<div>${n.kind === "observer" ? `Принял <b>${fmt(n.heard)}</b> пакетов` : `Услышал и передал дальше <b>${fmt(n.relayed)}</b> пакетов`}</div>
+      ${bar}<div class="meta">${mixLine(n.mix)}</div>
+      ${n.gate ? `<p class="meta">Через этот ретранслятор пакеты попадают к нашему observer'у. Поэтому к нему сходится трафик со всей сети: это чужие пакеты, которые он несёт к нам, а не пакеты для него.</p>` : ""}
+      ${n.critical.length ? `<h3 class="warn">Без него до нас не дойдут (${n.critical.length})</h3><div>${n.critical.map(esc).join(", ")}</div>` : ""}
+      ${incoming.length ? `<h3>Слышит пакеты от</h3><table>${rows(incoming, "source", (e) => fmt(e.packets))}</table>` : ""}
+      ${outgoing.length ? `<h3>Передаёт дальше</h3><table>${rows(outgoing, "target", (e) => fmt(e.packets))}</table>` : ""}`;
+  } else {
+    const partners = edges.filter((e) => e.source === id || e.target === id)
+      .map((e) => ({ ...e, other: e.source === id ? e.target : e.source })).sort((a, b) => b.packets - a.packets);
+    html += `<div>Обменов: <b>${fmt(n.size)}</b> с ${partners.length} собеседниками</div>${bar}<div class="meta">${mixLine(n.mix)}</div>
+      ${n.placed === "home" ? `<p class="meta">Координат нет: на карте стоит у ретранслятора ${esc(n.home)}, через который его пакеты входят в сеть.</p>` : ""}
+      ${n.lat == null ? `<p class="meta">Где находится, неизвестно: на карте его нет.</p>` : ""}
+      <h3>С кем</h3><table>${rows(partners, "other", (e) => mixLine(e.mix))}</table>`;
+  }
+  body.innerHTML = html + `<div id="nodeMore" class="meta"></div>`;
   body.querySelectorAll(".link").forEach((el) => el.addEventListener("click", () => {
     const other = state.nodes.get(el.dataset.id);
     if (other && other.lat != null) map.panTo([other.lat, other.lon]);
@@ -291,71 +373,87 @@ async function select(id) {
     if (more.first_seen) lines.push(`Впервые слышен: ${new Date(more.first_seen).toLocaleString("ru-RU")}`);
     if (more.last_seen) lines.push(`Последнее объявление: ${new Date(more.last_seen).toLocaleString("ru-RU")}`);
     if (more.adverts) lines.push(`Объявлений получено: ${fmt(more.adverts)}`);
-    if (n.placed === "neighbours") lines.push("Координат в объявлении нет: место на карте примерное, среди соседей.");
     for (const r of more.rhythm || []) {
       const p = r.period_confirmed ? `период ${Math.round(r.period_s / 60)} мин` : r.judged ? "без явного периода" : "мало данных для ритма";
       lines.push(`Ритм (${esc(r.kind)}): ${fmt(r.events)} пакетов, ${p}`);
     }
-    document.getElementById("nodeMore").innerHTML = `<h3>Справочник</h3>${lines.join("<br>")}`;
+    if (lines.length) document.getElementById("nodeMore").innerHTML = `<h3>Справочник</h3>${lines.join("<br>")}`;
   } catch { /* the card stays useful without these details */ }
 }
-document.getElementById("cardClose").addEventListener("click", () => {
-  state.selected = null; document.getElementById("card").hidden = true; setFocus();
-});
+document.getElementById("cardClose").addEventListener("click", closeCard);
 
 // ---------- loading ----------
-async function load() {
-  const days = document.getElementById("days").value, status = document.getElementById("status");
+function showMode() {
+  const m = MODES[state.mode];
+  document.querySelectorAll(".modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === state.mode));
+  document.querySelectorAll("[data-modes]").forEach((el) => (el.hidden = !el.dataset.modes.split(" ").includes(state.mode)));
+  document.getElementById("modeText").textContent = m.text;
+  document.getElementById("legend").innerHTML = m.legend;
+  document.getElementById("minUnit").textContent = m.unit;
+}
+
+async function load(fit) {
+  const days = document.getElementById("days").value, status = document.getElementById("status"), mode = state.mode;
   status.textContent = "Загрузка…";
   try {
-    const res = await fetch(`api/graph?days=${days}`);
+    const res = await fetch(`api/${mode === "path" ? "graph" : "talk"}?days=${days}`);
     if (!res.ok) throw new Error((await res.json()).error || res.status);
-    const data = await res.json();
-    const first = !state.data;
-    state.data = data; state.nodes = new Map(data.nodes.map((n) => [n.id, n]));
+    const raw = await res.json();
+    if (mode !== state.mode) return;
+    state.data = mode === "path" ? fromPath(raw) : fromTalk(raw);
+    state.nodes = new Map(state.data.nodes.map((n) => [n.id, n]));
     for (const m of state.markers.values()) m.remove();
     state.markers = new Map();
-    for (const n of data.nodes) {
+    for (const n of state.data.nodes) {
       if (n.lat == null) continue;
-      const marker = L.marker([n.lat, n.lon], { icon: pie(n), riseOnHover: true, zIndexOffset: n.kind === "observer" ? 1000 : Math.round(n.relayed / 10) });
+      const marker = L.marker([n.lat, n.lon], { icon: pie(n), riseOnHover: true, zIndexOffset: n.kind === "observer" ? 1000 : Math.round(n.size / 10) });
       marker.on("mouseover", (ev) => { state.hover = n.id; setFocus(); showTip(nodeTip(n), ev.originalEvent.clientX, ev.originalEvent.clientY); });
       marker.on("mouseout", () => { state.hover = null; tip.hidden = true; setFocus(); });
       marker.on("click", () => select(n.id));
       state.markers.set(n.id, marker);
     }
-    if (first && !viewFromHash()) {
-      const own = data.nodes.filter((n) => n.placed === "own");
+    if (fit && !viewFromHash()) {
+      const own = state.data.nodes.filter((n) => n.lat != null && !n.approx);
       if (own.length) map.fitBounds(L.latLngBounds(own.map((n) => [n.lat, n.lon])).pad(0.05));
     }
     status.textContent = "";
     applyFilters();
-    if (state.selected && state.nodes.has(state.selected)) select(state.selected);
+    if (state.selected && state.nodes.has(state.selected)) select(state.selected); else if (state.selected) closeCard();
   } catch (err) {
     status.textContent = "Не удалось загрузить данные: " + err.message;
   }
 }
 
-// The view is kept in the address (#zoom/lat/lon), so a reload or a shared link opens the same place.
+// The view is kept in the address (#zoom/lat/lon[/talk]), so a reload or a shared link opens the same place and mode.
 function viewFromHash() {
-  const m = location.hash.match(/^#(\d+)\/(-?[\d.]+)\/(-?[\d.]+)$/);
+  const m = location.hash.match(/^#(\d+)\/(-?[\d.]+)\/(-?[\d.]+)/);
   if (!m) return false;
   map.setView([+m[2], +m[3]], +m[1]);
   return true;
 }
-map.on("moveend", () => {
-  updateLabels(); setFocusLabels(new Set());
+function saveView() {
   const c = map.getCenter();
-  history.replaceState(null, "", `#${map.getZoom()}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}`);
-});
+  history.replaceState(null, "", `#${map.getZoom()}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}${state.mode === "talk" ? "/talk" : ""}`);
+}
+map.on("moveend", saveView);
 
-document.getElementById("days").addEventListener("change", load);
+document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => {
+  if (state.mode === b.dataset.mode) return;
+  state.mode = b.dataset.mode; state.selected = null; document.getElementById("card").hidden = true;
+  slider.value = DEFAULT_SLIDER[state.mode]; onSlider();
+  showMode(); saveView(); load(false);
+}));
+document.getElementById("days").addEventListener("change", () => load(false));
 document.querySelectorAll("[data-kind]").forEach((el) => el.addEventListener("change", () => {
   el.checked ? state.kinds.add(el.dataset.kind) : state.kinds.delete(el.dataset.kind); applyFilters();
 }));
 const slider = document.getElementById("min");
+const DEFAULT_SLIDER = { path: 35, talk: 10 };   // about 11 packets per link; 2 exchanges per pair
 const onSlider = () => { state.min = minFromSlider(+slider.value); document.getElementById("minOut").textContent = state.min; };
 slider.addEventListener("input", () => { onSlider(); applyFilters(); });
 document.getElementById("risks").addEventListener("change", (ev) => { state.risks = ev.target.checked; applyFilters(); });
-onSlider();
-load();
-setInterval(load, 10 * 60 * 1000);   // the calculation runs hourly; a refresh every 10 minutes is plenty
+
+if (location.hash.endsWith("/talk")) state.mode = "talk";
+slider.value = DEFAULT_SLIDER[state.mode];
+showMode(); onSlider(); load(true);
+setInterval(() => load(false), 10 * 60 * 1000);   // the calculations run hourly; every 10 minutes is plenty

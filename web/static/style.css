@@ -22,8 +22,17 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   border-radius: 12px; backdrop-filter: blur(8px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
 }
 #panel { top: 12px; left: 12px; width: 300px; max-height: calc(100% - 24px); overflow: auto; padding: 14px 16px; }
-#panel h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: 0.2px; }
-#panel .sub { margin: 2px 0 10px; color: var(--muted); font-size: 12.5px; }
+#panel .sub { margin: 8px 0 10px; color: var(--muted); font-size: 12.5px; }
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #11151b; padding: 3px; border-radius: 9px; }
+.modes button {
+  border: 0; border-radius: 7px; padding: 7px 6px; background: none; color: var(--muted); font: 600 12.5px/1.25 var(--font);
+  cursor: pointer;
+}
+.modes button.on { background: #2a3140; color: var(--text); }
+.modes button:hover:not(.on) { color: var(--text); }
+[hidden] { display: none !important; }
+.legend p { margin: 6px 0; }
+.legend .gate { color: var(--obs); }
 
 .controls { display: grid; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
 .row { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12.5px; }

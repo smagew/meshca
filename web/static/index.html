@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>meshca · карта связей</title>
+<title>meshca · карта</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -11,10 +11,11 @@
 <div id="map"></div>
 
 <aside id="panel">
-  <header>
-    <h1>Карта связей</h1>
-    <p class="sub">Как пакеты доходят до нашего observer'а</p>
-  </header>
+  <div class="modes" role="tablist">
+    <button data-mode="path" class="on" role="tab">Как пакеты доходят до нас</button>
+    <button data-mode="talk" role="tab">Кто с кем общается</button>
+  </div>
+  <p id="modeText" class="sub"></p>
 
   <section class="controls">
     <label class="row"><span>Период</span>
@@ -25,29 +26,22 @@
       </select>
     </label>
     <div class="row kinds">
-      <label title="Узел сообщает всем: «я есть», имя, роль, координаты"><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
+      <label data-modes="path" title="Узел сообщает всем: «я есть», имя, роль, координаты"><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
       <label title="Сообщения в общих чатах: Public, #test и другие"><input type="checkbox" data-kind="channel" checked><i class="sw channel"></i>каналы</label>
       <label title="Сообщения от человека к человеку и подтверждения их доставки"><input type="checkbox" data-kind="direct" checked><i class="sw direct"></i>личные сообщения</label>
-      <label title="Опрос ретранслятора или комнаты приложением: вход, состояние, телеметрия, ответы на это; анонимный вход; сообщённый обратный путь"><input type="checkbox" data-kind="service" checked><i class="sw service"></i>служебные</label>
+      <label title="Приложение опрашивает ретранслятор или комнату: вход, состояние, телеметрия, команды, ответы; сообщённый обратный путь"><input type="checkbox" data-kind="service" checked><i class="sw service"></i>служебные</label>
     </div>
-    <label class="row"><span>Показывать связи от <output id="minOut">5</output> пакетов</span>
+    <label class="row"><span>Показывать связи от <output id="minOut">5</output> <span id="minUnit">пакетов</span></span>
       <input type="range" id="min" min="0" max="100" value="35">
     </label>
-    <label class="row toggle" title="Оставить только критичные узлы и их связи"><input type="checkbox" id="risks"> только узлы, без которых кто-то пропадёт</label>
+    <label class="row toggle" data-modes="path" title="Оставить только критичные узлы и их связи"><input type="checkbox" id="risks"> только узлы, без которых кто-то пропадёт</label>
   </section>
 
   <section id="stats" class="stats"></section>
 
   <details class="legend" open>
     <summary>Как читать</summary>
-    <ul>
-      <li><b>Линия</b> — пакеты шли от узла к узлу по стрелке. Толще — больше пакетов. Цвет — чего больше: <b style="color:var(--adverts)">объявления</b>, <b style="color:var(--channel)">каналы</b> или <b style="color:var(--direct)">личные сообщения</b> (от человека к человеку) или <b style="color:var(--service)">служебные</b> (приложение опрашивает ретранслятор или комнату: вход, состояние, ответы).</li>
-      <li><b>Кружок</b> — узел. Размер — сколько пакетов он передал дальше, доли цвета — каких.</li>
-      <li><b class="crit">Красное кольцо</b> — критичный узел: через него идут все пакеты какого-то отправителя; без него этот отправитель перестанет до нас доходить.</li>
-      <li><b>Пунктир</b> — узел не определён или его место примерное.</li>
-      <li><b class="obs">Фиолетовый</b> — наш observer.</li>
-    </ul>
-    <p class="note">Видно только то, что дошло до нас: обмен между узлами в обратную сторону сюда не попадает.</p>
+    <div id="legend"></div>
   </details>
 </aside>
 

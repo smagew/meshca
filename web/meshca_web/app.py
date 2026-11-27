@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 import psycopg
 
-from . import graph
+from . import graph, talk
 
 log = logging.getLogger("meshca.web")
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -42,6 +42,30 @@ def load_graph(conn: psycopg.Connection, days: int) -> dict:
     result = graph.build(edges, info, critical)
     updated = conn.execute("SELECT max(computed_at) FROM critical_node").fetchone()[0]
     result.update(days=days, computed_at=updated)
+    return result
+
+
+FIRST_HOP = ("(SELECT h.pubkey FROM v_hop_resolved h WHERE h.packet_hash = p.hash AND h.position = 1 "
+             "AND h.pubkey IS NOT NULL LIMIT 1)")
+
+
+def load_talk(conn: psycopg.Connection, days: int) -> dict:
+    window = {"days": days}
+    direct = [talk.DirectPacket(*row) for row in conn.execute(
+        "SELECT extract(epoch FROM p.first_seen)::float8, d.src_hash, d.dst_hash, p.payload_type, "
+        "(SELECT o.pubkey FROM origin_resolution o WHERE o.packet_hash = p.hash AND o.rank = 1 "
+        " AND o.probability >= 0.7), " + FIRST_HOP + " "
+        "FROM direct_packet d JOIN packet p ON p.hash = d.packet_hash "
+        "WHERE p.first_seen > now() - make_interval(days => %(days)s)", window).fetchall()]
+    messages = [talk.ChannelMessage(*row) for row in conn.execute(
+        "SELECT extract(epoch FROM p.first_seen)::float8, m.channel, m.sender_name, coalesce(m.text, ''), " + FIRST_HOP + " "
+        "FROM channel_message m JOIN packet p ON p.hash = m.packet_hash "
+        "WHERE m.decrypted AND m.sender_name IS NOT NULL AND m.channel IS NOT NULL "
+        "AND p.first_seen > now() - make_interval(days => %(days)s)", window).fetchall()]
+    nodes = {pubkey: talk.Node(name, role, lat, lon) for pubkey, name, role, lat, lon in conn.execute(
+        "SELECT pubkey, name, node_role_name(role), lat, lon FROM node").fetchall()}
+    result = talk.build(direct, messages, nodes)
+    result.update(days=days, direct_packets=len(direct), channel_messages=len(messages))
     return result
 
 
@@ -91,13 +115,13 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as conn:
                     conn.execute("SELECT 1")
                 return self._send(200, b"ok", "text/plain")
-            if url.path == "/api/graph":
+            if url.path in ("/api/graph", "/api/talk"):
                 try:
                     days = min(MAX_DAYS, max(1, int(query.get("days", ["7"])[0])))
                 except ValueError:
                     return self._json({"error": "days must be a number"}, 400)
                 with connect() as conn:
-                    return self._json(load_graph(conn, days))
+                    return self._json(load_graph(conn, days) if url.path == "/api/graph" else load_talk(conn, days))
             if url.path == "/api/node":
                 node_id = query.get("id", [""])[0]
                 if not node_id or len(node_id) > 80:
