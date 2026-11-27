@@ -121,6 +121,24 @@ services:
     mem_limit: 256m
     logging: *logging
 
+  # The map page: read-only, open inside the local network like the dashboards.
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGDATABASE: meshca
+      PGUSER: meshca_grafana
+      PGPASSWORD: ${GRAFANA_DB_PASSWORD:?set in .env}
+    ports:
+      - "${MESHCA_WEB_BIND:-0.0.0.0}:${MESHCA_WEB_PORT:-3002}:8080"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    mem_limit: 128m
+    logging: *logging
+
   grafana:
     image: grafana/grafana:13.3.2
     restart: unless-stopped

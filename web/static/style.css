@@ -1,0 +1,95 @@
+:root {
+  --bg: #0f1216;
+  --panel: rgba(20, 24, 30, 0.92);
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #e6e9ee;
+  --muted: #8b95a3;
+  --adverts: #5b9cff;
+  --channel: #5fd38d;
+  --direct: #ffa24c;
+  --crit: #ff4d5e;
+  --obs: #b980ff;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+#map { position: fixed; inset: 0; background: var(--bg); }
+
+#panel, #card {
+  position: fixed; z-index: 1000; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; backdrop-filter: blur(8px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+#panel { top: 12px; left: 12px; width: 300px; max-height: calc(100% - 24px); overflow: auto; padding: 14px 16px; }
+#panel h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: 0.2px; }
+#panel .sub { margin: 2px 0 10px; color: var(--muted); font-size: 12.5px; }
+
+.controls { display: grid; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.row { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12.5px; }
+.row output { color: var(--text); font-weight: 600; }
+.row select, .row input[type=range] { width: 100%; }
+select {
+  background: #1b2028; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: inherit;
+}
+input[type=range] { accent-color: var(--adverts); }
+.kinds { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text); }
+.kinds label, .toggle { display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text); font-size: 13px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.sw.adverts { background: var(--adverts); } .sw.channel { background: var(--channel); } .sw.direct { background: var(--direct); }
+
+.stats { padding: 8px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+.stats b { color: var(--text); font-weight: 600; }
+
+.legend { border-top: 1px solid var(--line); padding-top: 8px; font-size: 12.5px; color: var(--muted); }
+.legend summary { cursor: pointer; color: var(--text); }
+.legend ul { margin: 6px 0; padding-left: 16px; }
+.legend li { margin: 3px 0; }
+.legend b { color: var(--text); font-weight: 600; }
+.legend b.crit { color: var(--crit); } .legend b.obs { color: var(--obs); }
+.legend .note { margin: 6px 0 0; }
+
+#card { top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow: auto; padding: 14px 16px; }
+#cardClose {
+  position: absolute; top: 6px; right: 8px; background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer;
+}
+#card h2 { margin: 0 24px 2px 0; font-size: 16px; font-weight: 600; word-break: break-word; }
+#card .meta { color: var(--muted); font-size: 12.5px; margin-bottom: 8px; }
+#card h3 { margin: 12px 0 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+#card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#card td { padding: 3px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+#card td.n { text-align: right; white-space: nowrap; padding-left: 8px; font-variant-numeric: tabular-nums; }
+#card .link { cursor: pointer; } #card .link:hover { color: #fff; text-decoration: underline; }
+#card .warn { color: var(--crit); }
+.bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; background: #222; }
+.bar i { display: block; height: 100%; }
+
+#tip {
+  position: fixed; z-index: 1100; pointer-events: none; background: rgba(12, 14, 18, 0.95); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 9px; font-size: 12.5px; max-width: 320px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+#tip b { font-weight: 600; }
+#status { position: fixed; z-index: 1000; bottom: 10px; left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 12.5px; }
+
+/* Node markers and labels */
+.node-icon { background: none; border: 0; }
+.node-icon svg { overflow: visible; display: block; }
+.leaflet-tooltip.node-label {
+  background: none; border: 0; box-shadow: none; padding: 0 0 0 2px; color: #dfe5ee; font: 600 11.5px/1.2 var(--font);
+  text-shadow: 0 0 3px #000, 0 0 6px #000, 0 0 2px #000;
+}
+.leaflet-tooltip.node-label::before { display: none; }
+.leaflet-container { background: var(--bg); font-family: var(--font); }
+/* Dark version of the standard OpenStreetMap style. */
+.leaflet-tile-pane .base { filter: invert(1) hue-rotate(180deg) brightness(0.72) contrast(0.92) saturate(0.35); }
+.leaflet-control-attribution { background: rgba(15, 18, 22, 0.7) !important; color: var(--muted) !important; }
+.leaflet-control-attribution a { color: #9fb3c8 !important; }
+.leaflet-bar a { background: #1b2028; color: var(--text); border-color: var(--line); }
+.leaflet-bar a:hover { background: #262c36; }
+.dim .leaflet-marker-icon:not(.lit) { opacity: 0.18; }
+.dim .leaflet-tooltip.node-label:not(.lit) { opacity: 0.15; }
+
+@media (max-width: 720px) {
+  #panel { width: auto; right: 12px; max-height: 45%; }
+  #panel .legend { display: none; }
+  #card { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 50%; }
+}

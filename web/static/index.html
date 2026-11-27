@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meshca · карта связей</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="panel">
+  <header>
+    <h1>Карта связей</h1>
+    <p class="sub">Как пакеты доходят до нашего observer'а</p>
+  </header>
+
+  <section class="controls">
+    <label class="row"><span>Период</span>
+      <select id="days">
+        <option value="1">сутки</option>
+        <option value="7" selected>7 дней</option>
+        <option value="30">30 дней</option>
+      </select>
+    </label>
+    <div class="row kinds">
+      <label><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
+      <label><input type="checkbox" data-kind="channel" checked><i class="sw channel"></i>каналы</label>
+      <label><input type="checkbox" data-kind="direct" checked><i class="sw direct"></i>личные</label>
+    </div>
+    <label class="row"><span>Показывать связи от <output id="minOut">5</output> пакетов</span>
+      <input type="range" id="min" min="0" max="100" value="35">
+    </label>
+    <label class="row toggle"><input type="checkbox" id="risks"> только слабые места</label>
+  </section>
+
+  <section id="stats" class="stats"></section>
+
+  <details class="legend" open>
+    <summary>Как читать</summary>
+    <ul>
+      <li><b>Линия</b> — пакеты шли от узла к узлу по стрелке. Толще — больше пакетов. Цвет — чего больше.</li>
+      <li><b>Кружок</b> — узел. Размер — сколько пакетов он передал дальше, доли цвета — каких.</li>
+      <li><b class="crit">Красное кольцо</b> — критичный узел: без него кто-то перестанет до нас доходить.</li>
+      <li><b>Пунктир</b> — узел не определён или его место примерное.</li>
+      <li><b class="obs">Фиолетовый</b> — наш observer.</li>
+    </ul>
+    <p class="note">Видно только то, что дошло до нас: обмен между узлами в обратную сторону сюда не попадает.</p>
+  </details>
+</aside>
+
+<aside id="card" hidden>
+  <button id="cardClose" aria-label="Закрыть">×</button>
+  <div id="cardBody"></div>
+</aside>
+
+<div id="tip" hidden></div>
+<div id="status"></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
