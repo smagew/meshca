@@ -25,14 +25,14 @@
       </select>
     </label>
     <div class="row kinds">
-      <label><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
-      <label><input type="checkbox" data-kind="channel" checked><i class="sw channel"></i>каналы</label>
-      <label><input type="checkbox" data-kind="direct" checked><i class="sw direct"></i>личные</label>
+      <label title="Узел сообщает всем: «я есть», имя, роль, координаты"><input type="checkbox" data-kind="adverts" checked><i class="sw adverts"></i>объявления</label>
+      <label title="Сообщения в общих чатах: Public, #test и другие"><input type="checkbox" data-kind="channel" checked><i class="sw channel"></i>каналы</label>
+      <label title="Пакеты одному узлу: личные сообщения, запросы к ретранслятору или комнате и ответы, подтверждения доставки, сообщённый обратный путь"><input type="checkbox" data-kind="direct" checked><i class="sw direct"></i>адресные</label>
     </div>
     <label class="row"><span>Показывать связи от <output id="minOut">5</output> пакетов</span>
       <input type="range" id="min" min="0" max="100" value="35">
     </label>
-    <label class="row toggle"><input type="checkbox" id="risks"> только слабые места</label>
+    <label class="row toggle" title="Оставить только критичные узлы и их связи"><input type="checkbox" id="risks"> только узлы, без которых кто-то пропадёт</label>
   </section>
 
   <section id="stats" class="stats"></section>
@@ -40,9 +40,9 @@
   <details class="legend" open>
     <summary>Как читать</summary>
     <ul>
-      <li><b>Линия</b> — пакеты шли от узла к узлу по стрелке. Толще — больше пакетов. Цвет — чего больше.</li>
+      <li><b>Линия</b> — пакеты шли от узла к узлу по стрелке. Толще — больше пакетов. Цвет — чего больше: <b style="color:var(--adverts)">объявления</b>, <b style="color:var(--channel)">каналы</b> или <b style="color:var(--direct)">адресные</b> — пакеты одному узлу (личные сообщения, запросы и ответы, подтверждения).</li>
       <li><b>Кружок</b> — узел. Размер — сколько пакетов он передал дальше, доли цвета — каких.</li>
-      <li><b class="crit">Красное кольцо</b> — критичный узел: без него кто-то перестанет до нас доходить.</li>
+      <li><b class="crit">Красное кольцо</b> — критичный узел: через него идут все пакеты какого-то отправителя; без него этот отправитель перестанет до нас доходить.</li>
       <li><b>Пунктир</b> — узел не определён или его место примерное.</li>
       <li><b class="obs">Фиолетовый</b> — наш observer.</li>
     </ul>

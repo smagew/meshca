@@ -3,7 +3,7 @@
 "use strict";
 
 const COLOURS = { adverts: "#5b9cff", channel: "#5fd38d", direct: "#ffa24c" };
-const KIND_NAMES = { adverts: "объявления", channel: "каналы", direct: "личные" };
+const KIND_NAMES = { adverts: "объявления", channel: "каналы", direct: "адресные" };
 const CRIT = "#ff4d5e", OBS = "#b980ff", UNKNOWN = "#8b95a3";
 
 const state = {
